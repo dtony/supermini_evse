@@ -48,6 +48,8 @@ void app_main(void) {
     }
   }
 
+  ESP_LOGI(LOG_TAG_MAIN, "This is version 2.");
+
   // Initialize NVS
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
@@ -60,7 +62,6 @@ void app_main(void) {
   // BLE Setup
 
   // initialize BLE controller and nimble stack
-  esp_nimble_hci_and_controller_init();
   nimble_port_init();
 
   // register sync and reset callbacks

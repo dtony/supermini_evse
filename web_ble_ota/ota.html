@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 OTA Web BLE</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; }
+    button { margin: 5px; padding: 10px 15px; }
+    .status { margin-left: 10px; font-weight: bold; }
+    .connected { color: green; }
+    .disconnected { color: red; }
+    .connecting { color: orange; }
+  </style>
+</head>
+<body>
+  <h2>ESP32 OTA (Web Bluetooth)</h2>
+  
+  <div>
+    <button id="scanBtn">Scanner les appareils BLE</button>
+    <span id="deviceStatus" class="status disconnected">Aucun appareil connecté</span>
+  </div>
+  
+  <div style="margin-top: 15px;">
+    <input type="file" id="fileInput" accept=".bin" />
+    <button id="sendBtn" disabled>Envoyer le firmware</button>
+  </div>
+
+  <h3>Journal</h3>
+  <div id="log"></div>
+
+  <script>
+    const OTA_DATA_UUID = "23408888-1f40-4cd8-9b89-ca8d45f8a5b0";
+    const OTA_CONTROL_UUID = "7ad671aa-21c0-46a4-b722-270e3ae3d830";
+    const OTA_SERVICE_UUID = "d6f1d96d-594c-4c53-b1c6-144a1dfde6d8";
+
+    const OPCODES = {
+      REQUEST: new Uint8Array([0x01]),
+      DONE: new Uint8Array([0x04]),
+      REQUEST_ACK: 0x02,
+      REQUEST_NAK: 0x03,
+      DONE_ACK: 0x05,
+      DONE_NAK: 0x06,
+    };
+
+    let logDiv = document.getElementById("log");
+    let connectedDevice = null;
+    let otaDataCharacteristic = null;
+    let otaControlCharacteristic = null;
+    
+    function log(msg) {
+      logDiv.textContent += msg + "\n";
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function updateDeviceStatus(status, className = 'disconnected') {
+      const statusElement = document.getElementById("deviceStatus");
+      statusElement.textContent = status;
+      statusElement.className = `status ${className}`;
+    }
+
+    function updateSendButton() {
+      const sendBtn = document.getElementById("sendBtn");
+      sendBtn.disabled = !connectedDevice;
+    }
+
+    // Gestion du scan et connexion BLE
+    document.getElementById("scanBtn").addEventListener("click", async () => {
+      try {
+        log("Scan des appareils BLE...");
+        
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: "esp32" }],
+          optionalServices: [OTA_SERVICE_UUID]
+        });
+
+        log("Connexion à " + device.name + "...");
+        updateDeviceStatus("Connexion en cours...", "connecting");
+
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(OTA_SERVICE_UUID);
+
+        otaDataCharacteristic = await service.getCharacteristic(OTA_DATA_UUID);
+        otaControlCharacteristic = await service.getCharacteristic(OTA_CONTROL_UUID);
+
+        // Notifications sur OTA Control
+        otaControlCharacteristic.startNotifications();
+        otaControlCharacteristic.addEventListener("characteristicvaluechanged", event => {
+          let value = event.target.value;
+          let code = value.getUint8(0);
+          if (code === OPCODES.REQUEST_ACK) log("ESP32: OTA request ACK");
+          else if (code === OPCODES.REQUEST_NAK) log("ESP32: OTA request NAK");
+          else if (code === OPCODES.DONE_ACK) log("ESP32: OTA done ACK");
+          else if (code === OPCODES.DONE_NAK) log("ESP32: OTA done NAK");
+          else log("ESP32: Notification code " + code);
+        });
+
+        // Gérer la déconnexion
+        device.addEventListener('gattserverdisconnected', () => {
+          log("Appareil déconnecté");
+          connectedDevice = null;
+          otaDataCharacteristic = null;
+          otaControlCharacteristic = null;
+          updateDeviceStatus("Aucun appareil connecté", "disconnected");
+          updateSendButton();
+        });
+
+        connectedDevice = device;
+        updateDeviceStatus("Connecté à " + device.name, "connected");
+        updateSendButton();
+        log("Connexion établie avec " + device.name);
+
+      } catch (err) {
+        log("Erreur lors du scan/connexion: " + err);
+        console.error(err);
+        updateDeviceStatus("Erreur de connexion", "disconnected");
+        updateSendButton();
+      }
+    });
+
+    // Gestion de l'envoi du firmware
+    document.getElementById("sendBtn").addEventListener("click", async () => {
+      let file = document.getElementById("fileInput").files[0];
+      if (!file) {
+        alert("Veuillez choisir un fichier firmware !");
+        return;
+      }
+
+      if (!connectedDevice || !otaDataCharacteristic || !otaControlCharacteristic) {
+        alert("Aucun appareil connecté ! Veuillez d'abord scanner et vous connecter à un appareil.");
+        return;
+      }
+
+      try {
+        log("Démarrage de l'envoi du firmware...");
+
+        // Déterminer la taille de paquet (fixe pour le web : 180 octets max)
+        const packetSize = 256;
+        log("Taille des paquets : " + packetSize);
+
+        // Lire le firmware
+        let arrayBuffer = await file.arrayBuffer();
+        let totalPackets = Math.ceil(arrayBuffer.byteLength / packetSize);
+        let firmware = [];
+        for (let i = 0; i < arrayBuffer.byteLength; i += packetSize) {
+          firmware.push(arrayBuffer.slice(i, i + packetSize));
+        }
+
+        log(`Firmware de ${arrayBuffer.byteLength} octets, ${totalPackets} paquets`);
+
+        // Envoyer la taille du paquet
+        await otaDataCharacteristic.writeValue(new Uint16Array([packetSize]));
+
+        // Envoyer la requête OTA
+        log("Envoi de la requête OTA...");
+        await otaControlCharacteristic.writeValue(OPCODES.REQUEST);
+
+        // Attendre un petit délai (l'ACK arrivera en notification)
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Envoyer les paquets
+        for (let i = 0; i < firmware.length; i++) {
+          log(`Envoi paquet ${i + 1}/${firmware.length}`);
+          await otaDataCharacteristic.writeValue(new Uint8Array(firmware[i]));
+          
+          // Petit délai entre les paquets pour éviter la surcharge
+          if (i % 10 === 0) {
+            await new Promise(r => setTimeout(r, 50));
+          }
+        }
+
+        // Envoyer le DONE
+        log("Envoi du DONE...");
+        await otaControlCharacteristic.writeValue(OPCODES.DONE);
+
+        log("Envoi du firmware terminé !");
+
+      } catch (err) {
+        log("Erreur: " + err);
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>

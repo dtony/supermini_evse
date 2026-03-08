@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8"/>
+    <link crossorigin="" href="https://fonts.gstatic.com/" rel="preconnect"/>
+    <link as="style" href="https://fonts.googleapis.com/css2?display=swap&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900&amp;family=Space+Grotesk%3Awght%40400%3B500%3B700" onload="this.rel='stylesheet'" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+    <title>Stitch Design</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+    <link href="data:image/x-icon;base64," rel="icon" type="image/x-icon"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <style type="text/tailwindcss">
+        :root {
+            --primary-color: #1173d4;
+            /* Typographie globale responsive */
+            font-size: clamp(14px, 1.2vw + 0.4vh, 18px);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0,
+            'wght' 400,
+            'GRAD' 0,
+            'opsz' 24
+        }
+    </style>
+    <style>
+        html, body {
+            height: 100dvh; /* fallback */
+            height: 100svh; /* mobile viewport stable */
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            overflow: hidden; /* Pas d'ascenseurs */
+        }
+        * { box-sizing: border-box; }
+        /* Conteneur principal */
+        .app-root { display: flex; flex-direction: column; height: 100%; }
+        /* Zone centrale qui prend tout l'espace disponible entre header et footer */
+        .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    /* Grille pilotée par variable --cols pour haute densité */
+    .grid-power { flex: 1; display: grid; grid-template-columns: repeat(var(--cols, 2), 1fr); gap: .75rem; min-height: 0; align-content: start; grid-auto-rows: auto; }
+        .grid-power label { width: 100%; height: auto; min-height: 0; min-width: 0; padding: clamp(.75rem, 3.3vw, 1.35rem); position: relative; transition: background .2s, border-color .2s, box-shadow .2s; }
+        /* Etats : actuel (appliqué) vs sélection (en attente) */
+        .grid-power label.is-current { border-color: var(--primary-color); background: rgba(17,115,212,0.18); box-shadow: 0 0 0 2px rgba(17,115,212,0.35); }
+        .grid-power label.is-selected:not(.is-current) { border-color: #f59e0b; background: rgba(245,158,11,0.18); box-shadow: 0 0 0 2px rgba(245,158,11,0.35); }
+        .grid-power label.is-current.is-selected { box-shadow: 0 0 0 2px rgba(17,115,212,0.55), 0 0 0 4px rgba(255,255,255,0.05); }
+        .state-badge { position:absolute; top:4px; right:6px; font-size: clamp(0.5rem,1.5vw,0.65rem); background:#1173d4; color:#fff; padding:2px 6px; border-radius:999px; line-height:1; font-weight:600; letter-spacing:.5px; pointer-events:none; }
+        .grid-power label.is-selected:not(.is-current) .state-badge { background:#f59e0b; color:#111; }
+        .grid-power label.is-current.is-selected .state-badge { background:linear-gradient(90deg,#1173d4,#27a4ff); }
+            /* Etat désactivé (BLE non connecté) */
+        .grid-power.power-disabled label { opacity:.45; filter:grayscale(.6); cursor:not-allowed; pointer-events:none; }
+            .grid-power.power-disabled input { pointer-events:none; }
+        /* Texte auto-ajusté davantage basé sur la largeur pour éviter des blocs trop hauts */
+    .amp-value { font-size: clamp(2rem, 9vw, 3rem); font-weight:700; display:inline-block; vertical-align:baseline; align-items:flex-end; gap:0.15em;  }
+    .amp-value .unit { font-size: clamp(1.4rem, 6.5vw, 2.1rem); line-height:.85; display:inline-block; vertical-align:baseline; }
+    /* Tous les états en gras (suppression style conditionnel) */
+    .watt-value { font-size: clamp(0.8rem, 3.6vw, 1.25rem); }
+        /* Ajustements très petits écrans : compacter l'espace vertical */
+        @media (max-width: 400px) {
+            .grid-power { gap: .6rem; }
+            .grid-power label { padding: clamp(.45rem, 2.5vw, .75rem); }
+        }
+    /* Fallback si JS off */
+    @media (max-width: 340px) { .grid-power { grid-template-columns: 1fr; } }
+    @media (min-width: 760px) { .grid-power { grid-template-columns: repeat(3, 1fr); } }
+    /* Titre augmenté (~+75%) : règle doublée + !important pour surpasser Tailwind injecté après */
+    h1, .app-root h1, h1.text-center { font-size: clamp(2rem, 4vh, 2.5rem) !important; line-height: .95; }
+    h2 { font-size: clamp(1.05rem, 2.4vh, 1.375rem); }
+    
+    /* Bouton confirmer (~+75% de 1rem => ~1.75rem) */
+    .confirm-btn { font-size: clamp(1.4rem, 2.8vh, 1.75rem); }
+    /* Labels footbar (~0.75rem *1.75 => ~1.3rem) */
+    .nav-label { font-size: clamp(1.05rem, 2.2vh, 1.3rem); }
+    /* Icônes footbar (~24px *1.75 => ~42px) */
+    .foot-icon { font-size: clamp(34px, 5vh, 42px); line-height:1; }
+    /* JS définira dynamiquement --cols */
+        /* Footer tailles approximatives gérées implicitement */
+
+    /* BLE Status Bar */
+    #ble-status-bar { position:sticky; top:0; z-index:50; background:#0e1317; border-bottom:1px solid #1f2a33; padding:4px 10px; display:flex; align-items:center; gap:10px; font-size:0.85rem; }
+    #ble-status-bar .dot { width:10px; height:10px; border-radius:50%; background:#666; box-shadow:0 0 0 2px rgba(255,255,255,0.05); }
+    #ble-status-text { color:#9dabb9; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #ble-connect-btn { background:#1173d4; color:#fff; font-weight:600; border:none; padding:6px 14px; border-radius:8px; cursor:pointer; font-size:.75rem; letter-spacing:.5px; display:flex; align-items:center; gap:4px; }
+    #ble-connect-btn:hover { background:#0d62b5; }
+    #ble-connect-btn.disabled { opacity:.5; cursor:default; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 0.9s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="ble-status-bar">
+        <div class="dot" id="ble-status-dot"></div>
+        <div id="ble-status-text">BLE: non connecté</div>
+        <button id="ble-connect-btn" type="button"><span class="material-symbols-outlined" style="font-size:16px;">bluetooth</span><span class="label">Connecter</span></button>
+    </div>
+    <div class="app-root bg-[#111418] dark group/design-root" style="--radio-dot-svg: url('data:image/svg+xml,%3csvg viewBox=%270 0 16 16%27 fill=%27%231173d4%27 xmlns=%27http://www.w3.org/2000/svg%27%3e%3ccircle cx=%278%27 cy=%278%27 r=%273%27/%3e%3c/svg%3e'); font-family: 'Space Grotesk','Noto Sans',sans-serif;">
+        <!-- Header -->
+        <div class="flex items-center bg-[#111418] p-4 pb-2 justify-center shrink-0">
+            <h1 class="text-white font-bold leading-tight tracking-[-0.015em] text-center w-full">Puissance de charge</h1>
+        </div>
+        <!-- Contenu principal -->
+    <div class="content-area p-4 pt-4">
+        <div id="view-power" class="flex flex-col flex-1">
+            <div class="relative flex-1">
+                <div id="power-loader" class="hidden absolute inset-0 z-20 flex items-center justify-center bg-[#111418]/80 backdrop-blur-sm">
+                    <div class="flex flex-col items-center gap-4">
+                        <div class="loader-spinner w-14 h-14 border-4 border-[#244155] border-t-[var(--primary-color)] rounded-full animate-spin"></div>
+                        <p class="text-sm text-[#9dabb9] font-medium" id="power-loader-text">Lecture puissance…</p>
+                    </div>
+                </div>
+                <div class="grid-power flex-1">
+                <label class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-[#3b4754] text-center cursor-pointer" data-power="0">
+                    <input class="hidden" name="charge-power" type="radio" value="0"/>
+                    <div class="amp-value text-white leading-none">Éteint</div>
+                    <div class="watt-value text-gray-400 leading-tight">0 W</div>
+                </label>
+                <label class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-[#3b4754] text-center cursor-pointer" data-power="6">
+                    <input class="hidden" name="charge-power" type="radio" value="6"/>
+                    <div class="amp-value text-white leading-none">6 <span class="unit">A</span></div>
+                    <div class="watt-value text-gray-400 leading-tight">1380 W</div>
+                </label>
+                <label class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-[#3b4754] text-center cursor-pointer" data-power="8">
+                    <input class="hidden" name="charge-power" type="radio" value="8"/>
+                    <div class="amp-value text-white leading-none">8 <span class="unit">A</span></div>
+                    <div class="watt-value text-gray-400 leading-tight">1840 W</div>
+                </label>
+                <label class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-[#3b4754] text-center cursor-pointer" data-power="10">
+                    <input class="hidden" name="charge-power" type="radio" value="10"/>
+                    <div class="amp-value text-white leading-none">10 <span class="unit">A</span></div>
+                    <div class="watt-value text-gray-400 leading-tight">2300 W</div>
+                </label>
+                <label class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-[#3b4754] text-center cursor-pointer" data-power="16">
+                    <input class="hidden" name="charge-power" type="radio" value="16"/>
+                    <div class="amp-value text-white leading-none">16 <span class="unit">A</span></div>
+                    <div class="watt-value text-gray-400 leading-tight">3680 W</div>
+                </label>
+                <label class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-[#3b4754] text-center cursor-pointer" data-power="32">
+                    <input class="hidden" name="charge-power" type="radio" value="32"/>
+                    <div class="amp-value text-white leading-none">32 <span class="unit">A</span></div>
+                    <div class="watt-value text-gray-400 leading-tight">7360 W</div>
+                </label>
+                </div>
+            </div>
+        </div>
+        <!-- Vue Firmware cachée -->
+        <div id="view-firmware" class="hidden flex flex-col flex-1 overflow-auto px-1 pb-4">
+            <section class="mb-6 mt-2">
+                <h2 class="text-white font-bold text-2xl mb-3">Informations firmware</h2>
+                <div class="space-y-3 rounded-lg bg-[#1c2127] p-4">
+                    <div class="flex items-center justify-between">
+                        <p class="text-sm text-[#9dabb9]">Version actuelle</p>
+                        <p id="fw-current" class="text-sm font-medium text-white">v1.2.3</p>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <p class="text-sm text-[#9dabb9]">Version disponible</p>
+                        <p id="fw-available" class="text-sm font-medium text-white">v1.2.4</p>
+                    </div>
+                </div>
+            </section>
+            <section class="mb-8 text-center">
+                <div class="mb-6 flex justify-center">
+                    <div class="relative flex size-44 items-center justify-center rounded-full border-8 border-[#3b4754]">
+                        <div id="fw-progress-ring" class="absolute inset-0 rounded-full border-8 border-[var(--primary-color)]" style="clip-path: polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%);"></div>
+                        <div class="text-center">
+                            <p class="text-sm text-[#9dabb9]">Progression</p>
+                            <p id="fw-progress-text" class="text-4xl font-bold text-white">0%</p>
+                        </div>
+                    </div>
+                </div>
+                <h2 class="text-white font-bold text-xl mb-2">Mise à jour disponible</h2>
+                <p class="text-[#9dabb9] text-sm leading-relaxed px-3">
+                    Une nouvelle version du firmware est disponible. La mise à jour peut prendre quelques minutes. Assurez-vous que votre installation est alimentée et stable.
+                </p>
+            </section>
+        </div>
+        <!-- Vue Historique -->
+        <div id="view-history" class="hidden flex flex-col flex-1 overflow-auto px-1 pb-4">
+            <div class="flex flex-1 items-center justify-center">
+                <div class="text-center max-w-xs">
+                    <span class="material-symbols-outlined text-6xl mb-4" style="color:#9dabb9;">history</span>
+                    <h2 class="text-white font-bold mb-2">Historique</h2>
+                    <p class="text-[#9dabb9] leading-relaxed">En construction…</p>
+                </div>
+            </div>
+        </div>
+        <div class="sticky bottom-0 bg-[#111418] pb-safe-area-bottom">
+            <div id="actions-power" class="flex px-4 py-3 justify-center">
+                <button id="btn-confirm-power" class="confirm-btn flex min-w-[140px] max-w-[320px] cursor-pointer items-center justify-center overflow-hidden rounded-xl h-14 px-10 bg-[var(--primary-color)] text-white font-bold leading-tight tracking-[0.015em] hover:bg-blue-600 transition-colors">
+                    <span class="truncate">Confirmer</span>
+                </button>
+            </div>
+            <div id="actions-firmware" class="hidden flex px-4 py-3 justify-center">
+                <button id="btn-start-firmware" class="confirm-btn flex min-w-[200px] max-w-[380px] cursor-pointer items-center justify-center overflow-hidden rounded-xl h-14 px-10 bg-[var(--primary-color)] text-white font-bold leading-tight tracking-[0.015em] hover:bg-blue-600 transition-colors">
+                    <span class="truncate">Démarrer la mise à jour</span>
+                </button>
+            </div>
+            <div class="flex gap-2 border-t border-[#283039] bg-[#1c2127] px-4 pb-3 pt-2">
+                <a id="nav-charge" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1 rounded-full" href="#">
+                    <div class="flex items-center justify-center">
+                        <span class="material-symbols-outlined foot-icon">bolt</span>
+                    </div>
+                    <p class="nav-label leading-tight tracking-[0.015em]">Charge</p>
+                </a>
+                <a id="nav-history" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1" href="#">
+                    <div class="flex items-center justify-center">
+                        <span class="material-symbols-outlined foot-icon">history</span>
+                    </div>
+                    <p class="nav-label leading-tight tracking-[0.015em]">Historique</p>
+                </a>
+                <a id="nav-settings" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1" href="#">
+                    <div class="flex items-center justify-center">
+                        <span class="material-symbols-outlined foot-icon">settings</span>
+                    </div>
+                    <p class="nav-label leading-tight tracking-[0.015em]">Paramètres</p>
+                </a>
+            </div>
+            <div class="h-5 bg-[#1c2127]"></div>
+        </div>
+    </div>
+    <script src="power_selection.js"></script>
+    </body></html>

@@ -279,4 +279,6 @@ void gatt_svr_init() {
   ble_svc_gatt_init();
   ble_gatts_count_cfg(gatt_svr_svcs);
   ble_gatts_add_svcs(gatt_svr_svcs);
+    // Set local GATT server MTU to 512
+    ble_att_set_preferred_mtu(512);
 }

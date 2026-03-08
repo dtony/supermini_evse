@@ -60,6 +60,7 @@ int gap_event_handler(struct ble_gap_event *event, void *arg) {
       ESP_LOGI(LOG_TAG_GAP, "GAP: Connection %s: status=%d",
                event->connect.status == 0 ? "established" : "failed",
                event->connect.status);
+     
       break;
 
     case BLE_GAP_EVENT_DISCONNECT:
