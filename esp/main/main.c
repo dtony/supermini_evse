@@ -1,3 +1,4 @@
+#include "driver/ledc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "gap.h"
@@ -6,12 +7,74 @@
 
 #define LOG_TAG_MAIN "main"
 
+#define CP_PWM_GPIO       4
+#define CP_PWM_FREQ_HZ    1000
+#define CP_PWM_TIMER      LEDC_TIMER_0
+#define CP_PWM_CHANNEL    LEDC_CHANNEL_0
+#define CP_PWM_MODE       LEDC_LOW_SPEED_MODE
+#define CP_PWM_RESOLUTION LEDC_TIMER_10_BIT
+
+uint8_t current_amp = 6;
+
+static uint32_t amp_to_duty(uint8_t amp) {
+  if (amp == 0) {
+    return 0;
+  }
+  uint32_t duty_us;
+  if (amp <= 51) {
+    // SAE J1772: duty_us = amp / 0.6 * 10 = amp * 100 / 6
+    duty_us = (uint32_t)amp * 100 / 6;
+  } else {
+    // SAE J1772: duty_us = ((amp - 640/4) / 2.5) * 10, rearranged: amp * 4 + 640
+    duty_us = (uint32_t)amp * 4 + 640;
+  }
+  // Convert duty_us (0–1000 μs) to LEDC duty (0 to 2^10 - 1 = 1023)
+  return (duty_us * 1023u) / 1000u;
+}
+
+static void cp_pwm_init(void) {
+  ledc_timer_config_t timer_cfg = {
+      .speed_mode      = CP_PWM_MODE,
+      .timer_num       = CP_PWM_TIMER,
+      .duty_resolution = CP_PWM_RESOLUTION,
+      .freq_hz         = CP_PWM_FREQ_HZ,
+      .clk_cfg         = LEDC_AUTO_CLK,
+  };
+  ESP_ERROR_CHECK(ledc_timer_config(&timer_cfg));
+
+  ledc_channel_config_t channel_cfg = {
+      .gpio_num   = CP_PWM_GPIO,
+      .speed_mode = CP_PWM_MODE,
+      .channel    = CP_PWM_CHANNEL,
+      .timer_sel  = CP_PWM_TIMER,
+      .duty       = amp_to_duty(current_amp),
+      .hpoint     = 0,
+  };
+  ESP_ERROR_CHECK(ledc_channel_config(&channel_cfg));
+}
+
+void cp_pwm_update(uint8_t amp) {
+  uint32_t duty = amp_to_duty(amp);
+  ESP_LOGI(LOG_TAG_MAIN, "cp_pwm_update: amp=%d duty=%lu", amp, duty);
+  esp_err_t err = ledc_set_duty(CP_PWM_MODE, CP_PWM_CHANNEL, duty);
+  if (err != ESP_OK) {
+    ESP_LOGE(LOG_TAG_MAIN, "ledc_set_duty failed: %s", esp_err_to_name(err));
+    return;
+  }
+  err = ledc_update_duty(CP_PWM_MODE, CP_PWM_CHANNEL);
+  if (err != ESP_OK) {
+    ESP_LOGE(LOG_TAG_MAIN, "ledc_update_duty failed: %s", esp_err_to_name(err));
+  }
+}
+
 bool run_diagnostics() {
   // do some diagnostics
   return true;
 }
 
 void app_main(void) {
+  cp_pwm_init();
+
   // check which partition is running
   const esp_partition_t *partition = esp_ota_get_running_partition();
 
@@ -48,7 +111,7 @@ void app_main(void) {
     }
   }
 
-  ESP_LOGI(LOG_TAG_MAIN, "This is version 2.");
+  ESP_LOGI(LOG_TAG_MAIN, "This is version 1.");
 
   // Initialize NVS
   esp_err_t ret = nvs_flash_init();

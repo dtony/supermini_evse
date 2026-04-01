@@ -9,7 +9,7 @@
 
 #define LOG_TAG_GAP "gap"
 
-static const char device_name[] = "esp32";
+static const char device_name[] = "Super Mini EVSE";
 
 void advertise();
 void reset_cb(int reason);

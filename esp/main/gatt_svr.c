@@ -5,6 +5,7 @@ uint8_t gatt_svr_chr_ota_data_val[512];
 
 uint16_t ota_control_val_handle;
 uint16_t ota_data_val_handle;
+uint16_t current_amp_val_handle;
 
 const esp_partition_t *update_partition;
 esp_ota_handle_t update_handle;
@@ -31,6 +32,11 @@ static int gatt_svr_chr_access_device_info(uint16_t conn_handle,
                                            uint16_t attr_handle,
                                            struct ble_gatt_access_ctxt *ctxt,
                                            void *arg);
+
+static int gatt_svr_chr_current_amp_cb(uint16_t conn_handle,
+                                       uint16_t attr_handle,
+                                       struct ble_gatt_access_ctxt *ctxt,
+                                       void *arg);
 
 static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
     {// Service: Device Information
@@ -75,6 +81,24 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                     .access_cb = gatt_svr_chr_ota_data_cb,
                     .flags = BLE_GATT_CHR_F_WRITE,
                     .val_handle = &ota_data_val_handle,
+                },
+                {
+                    0,
+                }},
+    },
+
+    {
+        // service: EVSE Control Service
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = &gatt_svr_svc_evse_uuid.u,
+        .characteristics =
+            (struct ble_gatt_chr_def[]){
+                {
+                    // characteristic: Current Amp
+                    .uuid = &gatt_svr_chr_current_amp_uuid.u,
+                    .access_cb = gatt_svr_chr_current_amp_cb,
+                    .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+                    .val_handle = &current_amp_val_handle,
                 },
                 {
                     0,
@@ -272,6 +296,40 @@ static int gatt_svr_chr_ota_data_cb(uint16_t conn_handle, uint16_t attr_handle,
   }
 
   return rc;
+}
+
+static int gatt_svr_chr_current_amp_cb(uint16_t conn_handle,
+                                       uint16_t attr_handle,
+                                       struct ble_gatt_access_ctxt *ctxt,
+                                       void *arg) {
+  int rc;
+  uint8_t val;
+
+  switch (ctxt->op) {
+    case BLE_GATT_ACCESS_OP_READ_CHR:
+      rc = os_mbuf_append(ctxt->om, &current_amp, sizeof(current_amp));
+      return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+
+    case BLE_GATT_ACCESS_OP_WRITE_CHR:
+      rc = gatt_svr_chr_write(ctxt->om, 1, sizeof(val), &val, NULL);
+      if (rc == 0 && (val == 0 || (val >= 6 && val <= 32))) {
+        current_amp = val;
+        cp_pwm_update(val);
+        ESP_LOGI(LOG_TAG_GATT_SVR, "Current amp has been updated to %d A", val);
+      } else if (rc == 0) {
+        ESP_LOGW(LOG_TAG_GATT_SVR,
+                "Received invalid current amp value: %d A. Ignoring.",
+                val);
+      }
+
+      return rc;
+
+    default:
+      break;
+  }
+
+  assert(0);
+  return BLE_ATT_ERR_UNLIKELY;
 }
 
 void gatt_svr_init() {
