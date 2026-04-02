@@ -1,11 +1,18 @@
+#include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "gap.h"
 #include "gatt_svr.h"
 #include "nvs_flash.h"
 
 #define LOG_TAG_MAIN "main"
+
+/* GPIO used to monitor an incoming PWM signal */
+#define PWM_MONITOR_GPIO 7
 
 #define CP_PWM_GPIO       4
 #define CP_PWM_FREQ_HZ    1000
@@ -15,6 +22,96 @@
 #define CP_PWM_RESOLUTION LEDC_TIMER_10_BIT
 
 uint8_t current_amp = 6;
+
+/* ---- PWM monitor --------------------------------------------------------- */
+
+#define PWM_MONITOR_TAG        "pwm_mon"
+#define PWM_MONITOR_TIMEOUT_US 50000LL /* 50 ms – signal absent if no edge seen */
+
+static portMUX_TYPE         pwm_mux        = portMUX_INITIALIZER_UNLOCKED;
+static volatile int64_t     pwm_rise_us    = 0; /* timestamp of last rising edge  */
+static volatile int64_t     pwm_period_us  = 0; /* measured period                */
+static volatile int64_t     pwm_high_us    = 0; /* measured high-time             */
+/* Set to true when a valid PWM (500-2 kHz, 5-90 % duty) is detected; never cleared */
+static volatile bool        pwm_signal_valid = false;
+
+static void IRAM_ATTR pwm_gpio_isr(void *arg)
+{
+    int64_t now   = esp_timer_get_time();
+    int     level = gpio_get_level(PWM_MONITOR_GPIO);
+
+    portENTER_CRITICAL_ISR(&pwm_mux);
+    if (level == 1) {
+        /* Rising edge: compute period from the previous rising edge */
+        if (pwm_rise_us > 0) {
+            pwm_period_us = now - pwm_rise_us;
+        }
+        pwm_rise_us = now;
+    } else {
+        /* Falling edge: compute high-time from the last rising edge */
+        if (pwm_rise_us > 0) {
+            pwm_high_us = now - pwm_rise_us;
+        }
+    }
+    portEXIT_CRITICAL_ISR(&pwm_mux);
+}
+
+static void pwm_monitor_task(void *arg)
+{
+    /* Configure GPIO as input with interrupt on every edge */
+    gpio_config_t io_conf = {
+        .intr_type    = GPIO_INTR_ANYEDGE,
+        .mode         = GPIO_MODE_INPUT,
+        .pin_bit_mask = (1ULL << PWM_MONITOR_GPIO),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    /* Install shared ISR service (safe to call even if already installed) */
+    esp_err_t isr_err = gpio_install_isr_service(0);
+    if (isr_err != ESP_OK && isr_err != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(isr_err);
+    }
+    ESP_ERROR_CHECK(gpio_isr_handler_add(PWM_MONITOR_GPIO, pwm_gpio_isr, NULL));
+
+    ESP_LOGI(PWM_MONITOR_TAG, "Monitoring PWM on GPIO%d", PWM_MONITOR_GPIO);
+
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        /* Snapshot shared state inside a critical section */
+        int64_t rise, period, high;
+        portENTER_CRITICAL(&pwm_mux);
+        rise   = pwm_rise_us;
+        period = pwm_period_us;
+        high   = pwm_high_us;
+        portEXIT_CRITICAL(&pwm_mux);
+
+        int64_t now           = esp_timer_get_time();
+        bool    signal_present = (rise > 0) && ((now - rise) < PWM_MONITOR_TIMEOUT_US);
+
+        if (!signal_present) {
+            ESP_LOGI(PWM_MONITOR_TAG, "GPIO%d: no PWM signal detected",
+                     PWM_MONITOR_GPIO);
+        } else if (period <= 0) {
+            ESP_LOGI(PWM_MONITOR_TAG, "GPIO%d: PWM signal detected (measuring...)",
+                     PWM_MONITOR_GPIO);
+        } else {
+            float freq_hz  = 1000000.0f / (float)period;
+            float duty_pct = (float)high * 100.0f / (float)period;
+            if (!pwm_signal_valid &&
+                freq_hz >= 500.0f && freq_hz <= 2000.0f &&
+                duty_pct >= 5.0f  && duty_pct <= 90.0f) {
+                pwm_signal_valid = true;
+            }
+            ESP_LOGI(PWM_MONITOR_TAG,
+                     "GPIO%d: PWM detected – freq=%.1f Hz, duty=%.1f%% [valid=%s]",
+                     PWM_MONITOR_GPIO, freq_hz, duty_pct,
+                     pwm_signal_valid ? "yes" : "no");
+        }
+    }
+}
 
 static uint32_t amp_to_duty(uint8_t amp) {
   if (amp == 0) {
@@ -73,7 +170,17 @@ bool run_diagnostics() {
 }
 
 void app_main(void) {
-  cp_pwm_init();
+  /* Start PWM monitor first, then wait 5 s before deciding whether to init CP PWM */
+  xTaskCreate(pwm_monitor_task, "pwm_monitor", 4096, NULL, 5, NULL);
+
+  vTaskDelay(pdMS_TO_TICKS(5000));
+
+  if (!pwm_signal_valid) {
+    cp_pwm_init();
+  } else {
+    ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init",
+             PWM_MONITOR_GPIO);
+  }
 
   // check which partition is running
   const esp_partition_t *partition = esp_ota_get_running_partition();
