@@ -1,6 +1,6 @@
 #include "gap.h"
-#include "esp_random.h"
 #include <inttypes.h>
+#include "host/ble_store.h"
 
 uint8_t addr_type;
 
@@ -88,11 +88,22 @@ int gap_event_handler(struct ble_gap_event *event, void *arg) {
                event->mtu.conn_handle, event->mtu.value);
       break;
 
+    case BLE_GAP_EVENT_REPEAT_PAIRING: {
+      // Phone forgot the bond but ESP32 still has it in NVS.
+      // Delete the stale bond and allow the new pairing to proceed.
+      struct ble_gap_conn_desc desc;
+      int rc = ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
+      assert(rc == 0);
+      ble_store_util_delete_peer(&desc.peer_id_addr);
+      ESP_LOGI(LOG_TAG_GAP, "GAP: Stale bond removed, retrying pairing");
+      return BLE_GAP_REPEAT_PAIRING_RETRY;
+    }
+
     case BLE_GAP_EVENT_PASSKEY_ACTION:
       if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
         struct ble_sm_io pkey = {0};
-        pkey.action   = BLE_SM_IOACT_DISP;
-        pkey.passkey  = esp_random() % 1000000;
+        pkey.action  = BLE_SM_IOACT_DISP;
+        pkey.passkey = ble_passkey;
         ESP_LOGI(LOG_TAG_GAP, "BLE Passkey: %06" PRIu32, pkey.passkey);
         ble_sm_inject_io(event->passkey.conn_handle, &pkey);
       }

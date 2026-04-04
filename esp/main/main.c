@@ -9,6 +9,8 @@
 #include "gatt_svr.h"
 #include "nvs_flash.h"
 #include "store/config/ble_store_config.h"
+#include "esp_random.h"
+#include <inttypes.h>
 
 #define LOG_TAG_MAIN "main"
 
@@ -23,6 +25,7 @@
 #define CP_PWM_RESOLUTION LEDC_TIMER_10_BIT
 
 uint8_t current_amp = 6;
+uint32_t ble_passkey = 0;
 
 /* ---- PWM monitor --------------------------------------------------------- */
 
@@ -229,6 +232,23 @@ void app_main(void) {
     ret = nvs_flash_init();
   }
   ESP_ERROR_CHECK(ret);
+
+  // Load or generate the BLE passkey from NVS
+  nvs_handle_t passkey_nvs;
+  esp_err_t pk_err = nvs_open("evse", NVS_READWRITE, &passkey_nvs);
+  if (pk_err == ESP_OK) {
+    pk_err = nvs_get_u32(passkey_nvs, "passkey", &ble_passkey);
+    if (pk_err == ESP_ERR_NVS_NOT_FOUND) {
+      ble_passkey = esp_random() % 1000000;
+      nvs_set_u32(passkey_nvs, "passkey", ble_passkey);
+      nvs_commit(passkey_nvs);
+    }
+    nvs_close(passkey_nvs);
+  } else {
+    ESP_LOGE(LOG_TAG_MAIN, "Failed to open NVS for passkey: %s", esp_err_to_name(pk_err));
+    ble_passkey = esp_random() % 1000000;
+  }
+  ESP_LOGI(LOG_TAG_MAIN, "BLE passkey: %06" PRIu32, ble_passkey);
 
   // BLE Setup
 

@@ -11,6 +11,8 @@
 
 static const char device_name[] = "Super Mini EVSE";
 
+extern uint32_t ble_passkey;
+
 void advertise();
 void reset_cb(int reason);
 void sync_cb(void);
