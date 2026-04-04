@@ -1,4 +1,6 @@
 #include "gap.h"
+#include "esp_random.h"
+#include <inttypes.h>
 
 uint8_t addr_type;
 
@@ -84,6 +86,16 @@ int gap_event_handler(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_MTU:
       ESP_LOGI(LOG_TAG_GAP, "GAP: MTU update: conn_handle=%d, mtu=%d",
                event->mtu.conn_handle, event->mtu.value);
+      break;
+
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+      if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
+        struct ble_sm_io pkey = {0};
+        pkey.action   = BLE_SM_IOACT_DISP;
+        pkey.passkey  = esp_random() % 1000000;
+        ESP_LOGI(LOG_TAG_GAP, "BLE Passkey: %06" PRIu32, pkey.passkey);
+        ble_sm_inject_io(event->passkey.conn_handle, &pkey);
+      }
       break;
   }
 

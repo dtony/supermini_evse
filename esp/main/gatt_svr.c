@@ -48,13 +48,13 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                  // Characteristic: Manufacturer Name
                  .uuid = BLE_UUID16_DECLARE(GATT_MANUFACTURER_NAME_UUID),
                  .access_cb = gatt_svr_chr_access_device_info,
-                 .flags = BLE_GATT_CHR_F_READ,
+                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_AUTHEN,
              },
              {
                  // Characteristic: Model Number
                  .uuid = BLE_UUID16_DECLARE(GATT_MODEL_NUMBER_UUID),
                  .access_cb = gatt_svr_chr_access_device_info,
-                 .flags = BLE_GATT_CHR_F_READ,
+                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_AUTHEN,
              },
              {
                  0,
@@ -72,14 +72,15 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                     .uuid = &gatt_svr_chr_ota_control_uuid.u,
                     .access_cb = gatt_svr_chr_ota_control_cb,
                     .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE |
-                             BLE_GATT_CHR_F_NOTIFY,
+                             BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_AUTHEN |
+                             BLE_GATT_CHR_F_WRITE_AUTHEN,
                     .val_handle = &ota_control_val_handle,
                 },
                 {
                     // characteristic: OTA data
                     .uuid = &gatt_svr_chr_ota_data_uuid.u,
                     .access_cb = gatt_svr_chr_ota_data_cb,
-                    .flags = BLE_GATT_CHR_F_WRITE,
+                    .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_AUTHEN,
                     .val_handle = &ota_data_val_handle,
                 },
                 {
@@ -97,7 +98,8 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                     // characteristic: Current Amp
                     .uuid = &gatt_svr_chr_current_amp_uuid.u,
                     .access_cb = gatt_svr_chr_current_amp_cb,
-                    .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+                    .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE |
+                             BLE_GATT_CHR_F_READ_AUTHEN | BLE_GATT_CHR_F_WRITE_AUTHEN,
                     .val_handle = &current_amp_val_handle,
                 },
                 {

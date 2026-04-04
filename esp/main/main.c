@@ -8,6 +8,7 @@
 #include "gap.h"
 #include "gatt_svr.h"
 #include "nvs_flash.h"
+#include "store/config/ble_store_config.h"
 
 #define LOG_TAG_MAIN "main"
 
@@ -238,8 +239,23 @@ void app_main(void) {
   ble_hs_cfg.sync_cb = sync_cb;
   ble_hs_cfg.reset_cb = reset_cb;
 
+  // security: mode 1, level 4 – authenticated LE Secure Connections
+  ble_hs_cfg.sm_io_cap       = BLE_HS_IO_DISPLAY_ONLY;
+  ble_hs_cfg.sm_sc           = 1; // LE Secure Connections (required for level 4)
+  ble_hs_cfg.sm_mitm         = 1; // require MITM protection
+  ble_hs_cfg.sm_bonding      = 1; // exchange and store LTK so keys survive reboot
+  // distribute LTK + IRK in both directions so the peer's resolvable private
+  // address can be resolved on reconnect (prevents re-pairing after reboot)
+  ble_hs_cfg.sm_our_key_dist   = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+  ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
   // initialize service table
   gatt_svr_init();
+
+  // initialize NVS-backed bond store so pairing info survives reboots
+  ble_hs_cfg.store_read_cb   = ble_store_config_read;
+  ble_hs_cfg.store_write_cb  = ble_store_config_write;
+  ble_hs_cfg.store_delete_cb = ble_store_config_delete;
 
   // set device name and start host task
   ble_svc_gap_device_name_set(device_name);
