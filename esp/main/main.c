@@ -15,9 +15,9 @@
 #define LOG_TAG_MAIN "main"
 
 /* GPIO used to monitor an incoming PWM signal */
-#define PWM_MONITOR_GPIO 7
+#define PWM_MONITOR_GPIO 3
 
-#define CP_PWM_GPIO       4
+#define CP_PWM_GPIO       10
 #define CP_PWM_FREQ_HZ    1000
 #define CP_PWM_TIMER      LEDC_TIMER_0
 #define CP_PWM_CHANNEL    LEDC_CHANNEL_0
