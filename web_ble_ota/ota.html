@@ -70,7 +70,7 @@
         log("Scan des appareils BLE...");
         
         const device = await navigator.bluetooth.requestDevice({
-          filters: [{ name: "esp32" }],
+          filters: [{ name: "Super Mini EVSE" }],
           optionalServices: [OTA_SERVICE_UUID]
         });
 
