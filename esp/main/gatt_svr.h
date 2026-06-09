@@ -11,6 +11,7 @@
 #define GATT_DEVICE_INFO_UUID 0x180A
 #define GATT_MANUFACTURER_NAME_UUID 0x2A29
 #define GATT_MODEL_NUMBER_UUID 0x2A24
+#define GATT_FIRMWARE_REVISION_UUID 0x2A26
 
 typedef enum {
   SVR_CHR_OTA_CONTROL_NOP,
@@ -52,7 +53,16 @@ static const ble_uuid128_t gatt_svr_chr_current_amp_uuid =
     BLE_UUID128_INIT(0x0c, 0x70, 0x7d, 0xc5, 0x77, 0x57, 0xcd, 0x9e, 0x05, 0x4a,
                      0x5f, 0xaa, 0xf8, 0xdc, 0x4f, 0x59);
 
+// characteristic: PWM Calibration Control Point
+// e3a1f2b4-7c5d-4e83-91f0-a6b2c3d4e5f6
+static const ble_uuid128_t gatt_svr_chr_pwm_cal_uuid =
+    BLE_UUID128_INIT(0xf6, 0xe5, 0xd4, 0xc3, 0xb2, 0xa6, 0xf0, 0x91, 0x83, 0x4e,
+                     0x5d, 0x7c, 0xb4, 0xf2, 0xa1, 0xe3);
+
+#define SVR_CHR_PWM_CAL_OPCODE_SET_OFFSET 0
 extern uint8_t current_amp;
+extern int16_t pwm_cal_offset_us;
 void cp_pwm_update(uint8_t amp);
+void pwm_cal_update(int16_t offset_us);
 
 void gatt_svr_init();

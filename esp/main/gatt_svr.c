@@ -1,4 +1,5 @@
 #include "gatt_svr.h"
+#include "version.h"
 
 uint8_t gatt_svr_chr_ota_control_val;
 uint8_t gatt_svr_chr_ota_data_val[512];
@@ -6,6 +7,7 @@ uint8_t gatt_svr_chr_ota_data_val[512];
 uint16_t ota_control_val_handle;
 uint16_t ota_data_val_handle;
 uint16_t current_amp_val_handle;
+uint16_t pwm_cal_val_handle;
 
 const esp_partition_t *update_partition;
 esp_ota_handle_t update_handle;
@@ -13,8 +15,9 @@ bool updating = false;
 uint16_t num_pkgs_received = 0;
 uint16_t packet_size = 0;
 
-static const char *manuf_name = "Company 42";
-static const char *model_num = "ESP32";
+static const char *manuf_name = "Tony Ducrocq";
+static const char *model_num = "Super Mini EVSE";
+static const char *fw_rev_str = FIRMWARE_REVISION_STRING;
 
 static int gatt_svr_chr_write(struct os_mbuf *om, uint16_t min_len,
                               uint16_t max_len, void *dst, uint16_t *len);
@@ -38,6 +41,11 @@ static int gatt_svr_chr_current_amp_cb(uint16_t conn_handle,
                                        struct ble_gatt_access_ctxt *ctxt,
                                        void *arg);
 
+static int gatt_svr_chr_pwm_cal_cb(uint16_t conn_handle,
+                                   uint16_t attr_handle,
+                                   struct ble_gatt_access_ctxt *ctxt,
+                                   void *arg);
+
 static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
     {// Service: Device Information
      .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -53,6 +61,12 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
              {
                  // Characteristic: Model Number
                  .uuid = BLE_UUID16_DECLARE(GATT_MODEL_NUMBER_UUID),
+                 .access_cb = gatt_svr_chr_access_device_info,
+                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_AUTHEN,
+             },
+             {
+                 // Characteristic: Firmware Revision
+                 .uuid = BLE_UUID16_DECLARE(GATT_FIRMWARE_REVISION_UUID),
                  .access_cb = gatt_svr_chr_access_device_info,
                  .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_AUTHEN,
              },
@@ -103,6 +117,14 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                     .val_handle = &current_amp_val_handle,
                 },
                 {
+                    // characteristic: PWM Calibration Control Point
+                    .uuid = &gatt_svr_chr_pwm_cal_uuid.u,
+                    .access_cb = gatt_svr_chr_pwm_cal_cb,
+                    .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE |
+                             BLE_GATT_CHR_F_READ_AUTHEN | BLE_GATT_CHR_F_WRITE_AUTHEN,
+                    .val_handle = &pwm_cal_val_handle,
+                },
+                {
                     0,
                 }},
     },
@@ -128,6 +150,11 @@ static int gatt_svr_chr_access_device_info(uint16_t conn_handle,
 
   if (uuid == GATT_MANUFACTURER_NAME_UUID) {
     rc = os_mbuf_append(ctxt->om, manuf_name, strlen(manuf_name));
+    return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+  }
+
+  if (uuid == GATT_FIRMWARE_REVISION_UUID) {
+    rc = os_mbuf_append(ctxt->om, fw_rev_str, strlen(fw_rev_str));
     return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
   }
 
@@ -325,6 +352,42 @@ static int gatt_svr_chr_current_amp_cb(uint16_t conn_handle,
       }
 
       return rc;
+
+    default:
+      break;
+  }
+
+  assert(0);
+  return BLE_ATT_ERR_UNLIKELY;
+}
+
+static int gatt_svr_chr_pwm_cal_cb(uint16_t conn_handle,
+                                   uint16_t attr_handle,
+                                   struct ble_gatt_access_ctxt *ctxt,
+                                   void *arg) {
+  int rc;
+  uint8_t buf[3];
+  uint16_t len;
+
+  switch (ctxt->op) {
+    case BLE_GATT_ACCESS_OP_READ_CHR:
+      rc = os_mbuf_append(ctxt->om, &pwm_cal_offset_us, sizeof(pwm_cal_offset_us));
+      return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+
+    case BLE_GATT_ACCESS_OP_WRITE_CHR:
+      rc = gatt_svr_chr_write(ctxt->om, 3, 3, buf, &len);
+      if (rc != 0) {
+        return rc;
+      }
+      if (buf[0] == SVR_CHR_PWM_CAL_OPCODE_SET_OFFSET) {
+        int16_t offset = (int16_t)((uint16_t)buf[1] | ((uint16_t)buf[2] << 8));
+        pwm_cal_update(offset);
+        ESP_LOGI(LOG_TAG_GATT_SVR, "PWM cal offset set to %d us", (int)offset);
+      } else {
+        ESP_LOGW(LOG_TAG_GATT_SVR, "Unknown PWM cal opcode: 0x%02x", buf[0]);
+        return BLE_ATT_ERR_UNLIKELY;
+      }
+      return 0;
 
     default:
       break;
