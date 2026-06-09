@@ -409,7 +409,7 @@
             try {
                 // Instead of fetching from GitHub assets (CORS issue), 
                 // we fetch from the local /firmwares// directory of the web server.
-                const localUrl = `/firmwares/supermini_evse_${version}.bin`;
+                const localUrl = `firmwares/supermini_evse_${version}.bin`;
                 console.log(`[OTA] Tentative de téléchargement local: ${localUrl}`);
                 
                 const binResponse = await fetch(localUrl);
