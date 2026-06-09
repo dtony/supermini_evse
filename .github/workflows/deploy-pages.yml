@@ -28,11 +28,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download release firmware (si déclenchée par une release)
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
           ASSET="supermini_evse_${TAG}.bin"
           mkdir -p web_ble_ota/firmwares
           gh release download "$TAG" --pattern "$ASSET" --dir web_ble_ota/firmwares
