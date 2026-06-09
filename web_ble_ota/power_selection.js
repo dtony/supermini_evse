@@ -121,10 +121,24 @@
     const POWER_CHAR_UUID = '594fdcf8-aa5f-4a05-9ecd-5777c57d700c';
     const DEVICE_INFO_SERVICE_UUID = '0000180a-0000-1000-8000-00805f9b34fb';
     const FW_REVISION_CHAR_UUID = '00002a26-0000-1000-8000-00805f9b34fb';
-    const GITHUB_API_URL = 'https://api.github.com/repos/dtony/supermini_evse/releases/latest';
     const OTA_SERVICE_UUID = 'd6f1d96d-594c-4c53-b1c6-144a1dfde6d8';
     const OTA_DATA_UUID = '23408888-1f40-4cd8-9b89-ca8d45f8a5b0';
     const OTA_CONTROL_UUID = '7ad671aa-21c0-46a4-b722-270e3ae3d830';
+
+    const GITHUB_API_URL = 'https://api.github.com/repos/dtony/supermini_evse/releases/latest';
+
+    // Detect base URL to handle both localhost and GitHub Pages
+    // If on GitHub Pages, base will be https://dtony.github.io/supermini_evse/
+    // If on localhost, base will be http://localhost:8080/
+    const getBaseUrl = () => {
+        const path = window.location.pathname;
+        // Check if we are in a subfolder (GitHub Pages typically uses the repo name)
+        if (path.includes('/supermini_evse/')) {
+            return window.location.origin + path.substring(0, path.lastIndexOf('/') + 1);
+        }
+        return window.location.origin + '/';
+    };
+    const BASE_URL = getBaseUrl();
 
     const gridPower = document.querySelector('.grid-power');
     const updateSectionContainer = document.getElementById('update-section-container');
@@ -402,20 +416,19 @@
 
             const version = release.tag_name.replace(/^v/, '');
             
-            // 2. Download the binary from local /firmwares/ directory
+            // 2. Download the binary from the appropriate directory
             showPowerLoader('Téléchargement du firmware...');
             
             let arrayBuffer;
             try {
-                // Instead of fetching from GitHub assets (CORS issue), 
-                // we fetch from the local /firmwares// directory of the web server.
-                const localUrl = `firmwares/supermini_evse_${version}.bin`;
-                console.log(`[OTA] Tentative de téléchargement local: ${localUrl}`);
+                // Use the dynamic BASE_URL to ensure the path is correct in both environments
+                const localUrl = `${BASE_URL}firmwares/supermini_evse_${version}.bin`;
+                console.log(`[OTA] Tentative de téléchargement: ${localUrl}`);
                 
                 const binResponse = await fetch(localUrl);
-                if (!binResponse.ok) throw new Error(`Fichier local introuvable (HTTP ${binResponse.status})`);
+                if (!binResponse.ok) throw new Error(`Fichier introuvable (HTTP ${binResponse.status})`);
                 arrayBuffer = await binResponse.arrayBuffer();
-                console.log('[OTA] Téléchargement réussi depuis le serveur local');
+                console.log('[OTA] Téléchargement réussi');
             } catch (fetchError) {
                 console.warn('[OTA] Échec du téléchargement local, passage au mode sélection manuelle', fetchError);
                 
