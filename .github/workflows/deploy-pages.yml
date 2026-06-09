@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -24,6 +26,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download release firmware (si déclenchée par une release)
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          ASSET="supermini_evse_${TAG}.bin"
+          mkdir -p web_ble_ota/firmwares
+          gh release download "$TAG" --pattern "$ASSET" --dir web_ble_ota/firmwares
+
+      - name: Récupérer tous les firmwares des releases précédentes
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p web_ble_ota/firmwares
+          gh release list --limit 50 --json tagName -q '.[].tagName' | while read TAG; do
+            ASSET="supermini_evse_${TAG}.bin"
+            if [ ! -f "web_ble_ota/firmwares/$ASSET" ]; then
+              gh release download "$TAG" --pattern "$ASSET" --dir web_ble_ota/firmwares 2>/dev/null || true
+            fi
+          done
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

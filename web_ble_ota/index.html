@@ -147,28 +147,38 @@
                 <div class="space-y-3 rounded-lg bg-[#1c2127] p-4">
                     <div class="flex items-center justify-between">
                         <p class="text-sm text-[#9dabb9]">Version actuelle</p>
-                        <p id="fw-current" class="text-sm font-medium text-white">v1.2.3</p>
+                        <p id="fw-current" class="text-sm font-medium text-gray-500">-</p>
                     </div>
                     <div class="flex items-center justify-between">
                         <p class="text-sm text-[#9dabb9]">Version disponible</p>
-                        <p id="fw-available" class="text-sm font-medium text-white">v1.2.4</p>
+                        <p id="fw-available" class="text-sm font-medium text-gray-500">-</p>
                     </div>
                 </div>
             </section>
             <section class="mb-8 text-center">
-                <div class="mb-6 flex justify-center">
-                    <div class="relative flex size-44 items-center justify-center rounded-full border-8 border-[#3b4754]">
-                        <div id="fw-progress-ring" class="absolute inset-0 rounded-full border-8 border-[var(--primary-color)]" style="clip-path: polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%);"></div>
-                        <div class="text-center">
-                            <p class="text-sm text-[#9dabb9]">Progression</p>
-                            <p id="fw-progress-text" class="text-4xl font-bold text-white">0%</p>
+                <div id="update-section-container" class="hidden">
+                    <div class="mb-6 flex justify-center">
+                        <div class="relative flex size-44 items-center justify-center rounded-full border-8 border-[#3b4754]">
+                            <div id="fw-progress-ring" class="absolute inset-0 rounded-full border-8 border-[var(--primary-color)]" style="clip-path: polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%);"></div>
+                            <div class="text-center">
+                                <p class="text-sm text-[#9dabb9]">Progression</p>
+                                <p id="fw-progress-text" class="text-4xl font-bold text-white">0%</p>
+                            </div>
                         </div>
                     </div>
+                    <div id="update-available-msg">
+                        <h2 class="text-white font-bold text-xl mb-2">Mise à jour disponible</h2>
+                        <p class="text-[#9dabb9] text-sm leading-relaxed px-3">
+                            Une nouvelle version du firmware est disponible. La mise à jour peut prendre quelques minutes. Assurez-vous que votre installation est alimentée et stable.
+                        </p>
+                    </div>
+                    <div id="update-up-to-date-msg" class="hidden">
+                        <h2 class="text-green-500 font-bold text-xl mb-2">À jour</h2>
+                        <p class="text-[#9dabb9] text-sm leading-relaxed px-3">
+                            Votre firmware est déjà à la dernière version.
+                        </p>
+                    </div>
                 </div>
-                <h2 class="text-white font-bold text-xl mb-2">Mise à jour disponible</h2>
-                <p class="text-[#9dabb9] text-sm leading-relaxed px-3">
-                    Une nouvelle version du firmware est disponible. La mise à jour peut prendre quelques minutes. Assurez-vous que votre installation est alimentée et stable.
-                </p>
             </section>
         </div>
         <!-- Vue Historique -->

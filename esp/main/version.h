@@ -1,3 +1,3 @@
 #pragma once
 
-#define FIRMWARE_REVISION_STRING "1.0.0"
+#define FIRMWARE_REVISION_STRING "0.9.0"
