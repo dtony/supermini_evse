@@ -14,6 +14,7 @@
 #include "nvs_flash.h"
 #include "store/config/ble_store_config.h"
 #include <inttypes.h>
+#include "version.h"
 
 #define LOG_TAG_MAIN "main"
 
@@ -201,6 +202,7 @@ static void pwm_monitor_task(void *arg)
         if (period_count == 0) {
             ESP_LOGI(PWM_MONITOR_TAG, "GPIO%d: no PWM signal detected", PWM_MONITOR_GPIO);
         } else {
+            ESP_LOGI(PWM_MONITOR_TAG, "GPIO%d: PWM signal detected", PWM_MONITOR_GPIO);
             float freq_hz  = (float)period_count * 1e6f / (float)period_sum_us;
             float duty_pct = (float)high_sum_us * 100.0f / (float)period_sum_us;
 
@@ -363,12 +365,19 @@ void app_main(void) {
   }
 
   /* Start PWM monitor first, then wait 5 s before deciding whether to init CP PWM */
-  xTaskCreate(pwm_monitor_task, "pwm_monitor", 4096, NULL, 5, NULL);
+  TaskHandle_t pwm_monitor_handle = NULL;
+  xTaskCreate(pwm_monitor_task, "pwm_monitor", 4096, NULL, 5, &pwm_monitor_handle);
 
   vTaskDelay(pdMS_TO_TICKS(5000));
 
   if (!pwm_signal_valid) {
+    if (pwm_monitor_handle != NULL) {
+      vTaskDelete(pwm_monitor_handle);
+      pwm_monitor_handle = NULL;
+    }
     cp_pwm_update(6);
+    ESP_LOGI(LOG_TAG_MAIN, "No valid PWM detected on GPIO%d – initializing CP PWM", PWM_MONITOR_GPIO);
+
   } else {
     ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init",
              PWM_MONITOR_GPIO);
@@ -410,7 +419,7 @@ void app_main(void) {
     }
   }
 
-  ESP_LOGI(LOG_TAG_MAIN, "This is version 1.");
+  ESP_LOGI(LOG_TAG_MAIN, "This is version %s", FIRMWARE_REVISION_STRING);
 
   // Load or generate the BLE passkey from NVS
   nvs_handle_t passkey_nvs;
