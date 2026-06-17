@@ -71,13 +71,18 @@
     const viewHistory = document.getElementById('view-history');
     const actionsPower = document.getElementById('actions-power');
     const actionsFirmware = document.getElementById('actions-firmware');
+    const actionsParam = document.getElementById('actions-param');
     const navCharge = document.getElementById('nav-charge');
-    const navSettings = document.getElementById('nav-settings');
-    const navHistory = document.getElementById('nav-history');
+    const navOta = document.getElementById('nav-settings');
+    const navParam = document.getElementById('nav-param');
+
+    const pwmOffsetInput = document.getElementById('pwm-offset');
+    const pwmOffsetDisplay = document.getElementById('pwm-offset-display');
+    const btnConfirmParam = document.getElementById('btn-confirm-param');
 
     function setActiveNav(el) {
         const gray = '#9dabb9';
-        [navCharge, navSettings, navHistory].forEach(a => {
+        [navCharge, navOta, navParam].forEach(a => {
             if (!a) return;
             a.classList.remove('font-bold'); a.style.color = gray;
             a.querySelectorAll('p').forEach(p=>{ p.classList.remove('font-bold'); p.style.color = gray; });
@@ -93,20 +98,30 @@
 
     function showView(name) {
         [viewPower, viewFirmware, viewHistory].forEach(v=> v && v.classList.add('hidden'));
-        actionsPower?.classList.add('hidden'); actionsFirmware?.classList.add('hidden');
+        actionsPower?.classList.add('hidden'); 
+        actionsFirmware?.classList.add('hidden');
+        actionsParam?.classList.add('hidden');
+
         if (name === 'firmware') {
-            viewFirmware?.classList.remove('hidden'); actionsFirmware?.classList.remove('hidden'); titleEl.textContent = 'Mise à jour du firmware'; setActiveNav(navSettings); document.documentElement.style.setProperty('--cols','1');
+            viewFirmware?.classList.remove('hidden'); actionsFirmware?.classList.remove('hidden'); titleEl.textContent = 'Mise à jour du firmware'; setActiveNav(navOta); document.documentElement.style.setProperty('--cols','1');
             fetchLatestRelease();
-        } else if (name === 'history') {
-            viewHistory?.classList.remove('hidden'); titleEl.textContent = 'Historique'; setActiveNav(navHistory); document.documentElement.style.setProperty('--cols','1');
+        } else if (name === 'param') {
+            viewHistory?.classList.remove('hidden'); actionsParam?.classList.remove('hidden'); titleEl.textContent = 'Paramètres'; setActiveNav(navParam); document.documentElement.style.setProperty('--cols','1');
         } else {
             viewPower?.classList.remove('hidden'); actionsPower?.classList.remove('hidden'); titleEl.textContent = 'Puissance de charge'; setCols(); setActiveNav(navCharge);
         }
     }
 
-    navSettings?.addEventListener('click', (e)=>{ e.preventDefault(); showView('firmware'); });
+    // Slider display logic
+    if (pwmOffsetInput && pwmOffsetDisplay) {
+        pwmOffsetInput.addEventListener('input', () => {
+            pwmOffsetDisplay.textContent = pwmOffsetInput.value;
+        });
+    }
+
+    navOta?.addEventListener('click', (e)=>{ e.preventDefault(); showView('firmware'); });
     navCharge?.addEventListener('click', (e)=>{ e.preventDefault(); showView('power'); });
-    navHistory?.addEventListener('click', (e)=>{ e.preventDefault(); showView('history'); });
+    navParam?.addEventListener('click', (e)=>{ e.preventDefault(); showView('param'); });
 
     setActiveNav(navCharge);
 

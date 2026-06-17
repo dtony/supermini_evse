@@ -142,6 +142,32 @@
                 </div>
             </div>
         </div>
+
+        <!-- Vue Paramètres -->
+        <div id="view-history" class="hidden flex flex-col flex-1 overflow-auto px-1 pb-4">
+            <div class="flex flex-col gap-6">
+                <section>
+                    <h2 class="text-white font-bold text-xl mb-3">Réglages PWM</h2>
+                    <div class="space-y-4 rounded-lg bg-[#1c2127] p-4">
+                        <div class="flex flex-col gap-2">
+                            <div class="flex justify-between items-center">
+                                <label for="pwm-offset" class="text-sm text-[#9dabb9]">PWM Offset</label>
+                                <span id="pwm-offset-display" class="text-white font-mono font-bold">0</span>
+                            </div>
+                            <input type="range" id="pwm-offset" name="pwm-offset" 
+                                min="-256" max="256" step="1" value="0"
+                                class="w-full h-2 bg-[#3b4754] rounded-lg appearance-none cursor-pointer accent-[#1173d4]">
+                            <div class="flex justify-between text-[10px] text-gray-500 px-1">
+                                <span>-256</span>
+                                <span>0</span>
+                                <span>+256</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
         <!-- Vue Firmware cachée -->
         <div id="view-firmware" class="hidden flex flex-col flex-1 overflow-auto px-1 pb-4">
             <section class="mb-6 mt-2">
@@ -183,16 +209,9 @@
                 </div>
             </section>
         </div>
-        <!-- Vue Historique -->
-        <div id="view-history" class="hidden flex flex-col flex-1 overflow-auto px-1 pb-4">
-            <div class="flex flex-1 items-center justify-center">
-                <div class="text-center max-w-xs">
-                    <span class="material-symbols-outlined text-6xl mb-4" style="color:#9dabb9;">history</span>
-                    <h2 class="text-white font-bold mb-2">Historique</h2>
-                    <p class="text-[#9dabb9] leading-relaxed">En construction…</p>
-                </div>
-            </div>
-        </div>
+
+        
+        
         <div class="sticky bottom-0 bg-[#111418] pb-safe-area-bottom">
             <div id="actions-power" class="flex px-4 py-3 justify-center">
                 <button id="btn-confirm-power" class="confirm-btn flex min-w-[140px] max-w-[320px] cursor-pointer items-center justify-center overflow-hidden rounded-xl h-14 px-10 bg-[var(--primary-color)] text-white font-bold leading-tight tracking-[0.015em] hover:bg-blue-600 transition-colors">
@@ -204,6 +223,11 @@
                     <span class="truncate">Démarrer la mise à jour</span>
                 </button>
             </div>
+            <div id="actions-param" class="hidden flex px-4 py-3 justify-center">
+                <button id="btn-confirm-param" class="confirm-btn flex min-w-[140px] max-w-[320px] cursor-pointer items-center justify-center overflow-hidden rounded-xl h-14 px-10 bg-[var(--primary-color)] text-white font-bold leading-tight tracking-[0.015em] hover:bg-blue-600 transition-colors">
+                    <span class="truncate">Confirmer</span>
+                </button>
+            </div>
             <div class="flex gap-2 border-t border-[#283039] bg-[#1c2127] px-4 pb-3 pt-2">
                 <a id="nav-charge" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1 rounded-full" href="#">
                     <div class="flex items-center justify-center">
@@ -211,21 +235,23 @@
                     </div>
                     <p class="nav-label leading-tight tracking-[0.015em]">Charge</p>
                 </a>
-                <a id="nav-history" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1" href="#">
+                <a id="nav-param" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1" href="#">
                     <div class="flex items-center justify-center">
-                        <span class="material-symbols-outlined foot-icon">history</span>
-                    </div>
-                    <p class="nav-label leading-tight tracking-[0.015em]">Historique</p>
+                        <span class="material-symbols-outlined foot-icon">settings</span>
+                    </div >
+                    <p class="nav-label leading-tight tracking-[0.015em]">Paramètres</p>
                 </a>
                 <a id="nav-settings" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1" href="#">
                     <div class="flex items-center justify-center">
-                        <span class="material-symbols-outlined foot-icon">settings</span>
+                        <span class="material-symbols-outlined foot-icon">system_update</span>
                     </div>
-                    <p class="nav-label leading-tight tracking-[0.015em]">Paramètres</p>
+                    <p class="nav-label leading-tight tracking-[0.015em]">OTA</p>
                 </a>
             </div>
             <div class="h-5 bg-[#1c2127]"></div>
         </div>
+
+        
     </div>
     <script src="power_selection.js"></script>
     <script>
