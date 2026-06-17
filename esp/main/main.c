@@ -1,3 +1,4 @@
+#include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -19,12 +20,16 @@
 /* GPIO used to monitor an incoming PWM signal */
 #define PWM_MONITOR_GPIO 7
 
+/* GPIO used to generate the CP PWM signal */
 #define CP_PWM_GPIO       4
 #define CP_PWM_FREQ_HZ    1000
 #define CP_PWM_TIMER      LEDC_TIMER_0
 #define CP_PWM_CHANNEL    LEDC_CHANNEL_0
 #define CP_PWM_MODE       LEDC_LOW_SPEED_MODE
 #define CP_PWM_RESOLUTION LEDC_TIMER_10_BIT
+
+/* GPIO used to connect optocoupler emitter to GND */
+#define OPTO_GND_GPIO 10
 
 uint8_t current_amp = 0;
 int16_t pwm_cal_offset_us = 0;
@@ -289,6 +294,13 @@ static void cp_pwm_init(void) {
 void cp_pwm_update(uint8_t amp) {
   uint32_t duty = amp_to_duty(amp);
   ESP_LOGI(LOG_TAG_MAIN, "cp_pwm_update: amp=%d duty=%lu", amp, duty);
+  if (amp == 0) {
+    gpio_set_direction(OPTO_GND_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(OPTO_GND_GPIO, GPIO_FLOATING);
+  } else {
+    gpio_set_direction(OPTO_GND_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(OPTO_GND_GPIO, 0);
+  }
   esp_err_t err = ledc_set_duty(CP_PWM_MODE, CP_PWM_CHANNEL, duty);
   if (err != ESP_OK) {
     ESP_LOGE(LOG_TAG_MAIN, "ledc_set_duty failed: %s", esp_err_to_name(err));
@@ -317,6 +329,15 @@ bool run_diagnostics() {
 }
 
 void app_main(void) {
+  gpio_config_t opto_cfg = {
+      .pin_bit_mask = (1ULL << OPTO_GND_GPIO),
+      .mode         = GPIO_MODE_INPUT,
+      .pull_up_en   = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type    = GPIO_INTR_DISABLE,
+  };
+  ESP_ERROR_CHECK(gpio_config(&opto_cfg));
+
   cp_pwm_init();
 
   // Initialize NVS first so the calibration offset is available before cp_pwm_init
