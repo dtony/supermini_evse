@@ -26,7 +26,7 @@
 #define CP_PWM_MODE       LEDC_LOW_SPEED_MODE
 #define CP_PWM_RESOLUTION LEDC_TIMER_10_BIT
 
-uint8_t current_amp = 6;
+uint8_t current_amp = 0;
 int16_t pwm_cal_offset_us = 0;
 uint32_t ble_passkey = 0;
 
@@ -127,7 +127,7 @@ static void pwm_monitor_task(void *arg)
     cali_ok = (adc_cali_create_scheme_line_fitting(&cali_cfg, &cali_handle) == ESP_OK);
 #endif
     if (!cali_ok) {
-        ESP_LOGW(PWM_MONITOR_TAG, "ADC calibration unavailable – raw mV reported");
+        ESP_LOGW(PWM_MONITOR_TAG, "ADC calibration unavailable - raw mV reported");
     }
 
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
@@ -317,6 +317,8 @@ bool run_diagnostics() {
 }
 
 void app_main(void) {
+  cp_pwm_init();
+
   // Initialize NVS first so the calibration offset is available before cp_pwm_init
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
@@ -345,7 +347,7 @@ void app_main(void) {
   vTaskDelay(pdMS_TO_TICKS(5000));
 
   if (!pwm_signal_valid) {
-    cp_pwm_init();
+    cp_pwm_update(6);
   } else {
     ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init",
              PWM_MONITOR_GPIO);
