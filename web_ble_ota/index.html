@@ -7,7 +7,7 @@
     <link crossorigin="" href="https://fonts.gstatic.com/" rel="preconnect"/>
     <link as="style" href="https://fonts.googleapis.com/css2?display=swap&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900&amp;family=Space+Grotesk%3Awght%40400%3B500%3B700" onload="this.rel='stylesheet'" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
-    <title>SuperMini EVSE</title>
+    <title>SuperMini EVSE V2</title>
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <style type="text/tailwindcss">
@@ -282,18 +282,52 @@
 
         
     </div>
+    <!-- Bannière de mise à jour PWA -->
+    <div id="update-banner" style="display:none; position:fixed; bottom:1rem; left:50%; transform:translateX(-50%); z-index:9999; background:#1173d4; color:#fff; padding:.6rem 1.2rem; border-radius:999px; box-shadow:0 4px 16px rgba(0,0,0,.4); align-items:center; gap:.8rem; font-size:.875rem; white-space:nowrap;">
+      <span>Nouvelle version disponible</span>
+      <button id="update-btn" style="background:#fff; color:#1173d4; border:none; border-radius:999px; padding:.3rem .9rem; font-weight:600; cursor:pointer;">Mettre à jour</button>
+    </div>
     <script src="power_selection.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js')
                     .then(registration => {
-                        console.log('SW registered: ', registration);
+                        console.log('[SW] Enregistré:', registration);
+
+                        // Détection d'une nouvelle version du SW
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // Un nouveau SW est prêt — afficher la bannière
+                                    document.getElementById('update-banner').style.display = 'flex';
+                                }
+                            });
+                        });
                     })
-                    .catch(registrationError => {
-                        console.log('SW registration failed: ', registrationError);
-                    });
+                    .catch(err => console.error('[SW] Enregistrement échoué:', err));
+
+                // Rechargement automatique après que le nouveau SW a pris le contrôle
+                let refreshing = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (!refreshing) {
+                        refreshing = true;
+                        window.location.reload();
+                    }
+                });
             });
         }
+
+        // Bouton de la bannière de mise à jour
+        document.getElementById('update-btn')?.addEventListener('click', () => {
+            navigator.serviceWorker.ready.then(reg => {
+                if (reg.waiting) {
+                    reg.waiting.postMessage('SKIP_WAITING');
+                } else {
+                    window.location.reload();
+                }
+            });
+        });
     </script>
     </body></html>
