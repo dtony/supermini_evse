@@ -1,4 +1,3 @@
-#include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -18,8 +17,10 @@
 
 #define LOG_TAG_MAIN "main"
 
-/* GPIO used to monitor an incoming PWM signal */
-#define PWM_MONITOR_GPIO 7
+/* GPIO used to monitor an incoming PWM signal.
+ * Must be an ADC-capable pin: on ESP32-C3, ADC1 covers GPIO0–GPIO5 only.
+ * GPIO3 = ADC1_CH3 is used here. */
+#define PWM_MONITOR_GPIO 3
 
 /* GPIO used to generate the CP PWM signal */
 #define CP_PWM_GPIO       4
@@ -28,9 +29,6 @@
 #define CP_PWM_CHANNEL    LEDC_CHANNEL_0
 #define CP_PWM_MODE       LEDC_LOW_SPEED_MODE
 #define CP_PWM_RESOLUTION LEDC_TIMER_10_BIT
-
-/* GPIO used to connect optocoupler emitter to GND */
-#define OPTO_GND_GPIO 10
 
 uint8_t current_amp = 0;
 int16_t pwm_cal_offset_us = 0;
@@ -46,47 +44,17 @@ uint32_t ble_passkey = 0;
 #define PWM_MONITOR_FRAME_SIZE      512             /* bytes per DMA frame (128 samples × 4 B) */
 #define PWM_MONITOR_BUF_SIZE        (PWM_MONITOR_FRAME_SIZE * 4)
 
-/* Scaling factor: actual_CP_voltage_mV = adc_pin_mV * CP_VOLTAGE_DIVIDER.
- * Adjust to match the resistor divider placed in front of GPIO3.            */
-#define CP_VOLTAGE_DIVIDER          1.0f
-
-/* J1772 state thresholds (mV on the CP wire, after applying CP_VOLTAGE_DIVIDER) */
-#define CP_STATE_TOL_MV  1000
-#define CP_STATE_A_MV   12000   /* 12 V ±1 V – no vehicle        */
-#define CP_STATE_B_MV    9000   /*  9 V ±1 V – vehicle connected  */
-#define CP_STATE_C_MV    6000   /*  6 V ±1 V – ready to charge    */
-#define CP_STATE_D_MV    3000   /*  3 V ±1 V – ventilation needed */
+/* Voltage divider in front of GPIO3: R1=68 kΩ (series), R2=22 kΩ (shunt to GND).
+ * Signal also passes through a 1N4148WS diode (Vf ≈ 0.7 V) before the ADC pin. */
+#define CP_DIVIDER_R1_K             68.0f
+#define CP_DIVIDER_R2_K             22.0f
+#define CP_DIVIDER_FACTOR           ((CP_DIVIDER_R1_K + CP_DIVIDER_R2_K) / CP_DIVIDER_R2_K) /* ≈ 4.09 */
+#define DIODE_1N4148WS_VF_MV        700   /* 1N4148WS forward voltage drop ≈ 0.7 V */
+#define DIODE_CONDUCTING_THRESH_RAW 100   /* ADC raw noise floor; above = diode conducting */
+#define SIGNAL_DETECT_THRESHOLD_MV  3000
 
 /* Set to true when a valid PWM (500–2 kHz, 5–90 % duty) is detected; never cleared */
 static volatile bool pwm_signal_valid = false;
-
-typedef enum {
-    CP_STATE_UNKNOWN = 0,
-    CP_STATE_A,   /* 12 V – no vehicle        */
-    CP_STATE_B,   /*  9 V – vehicle connected  */
-    CP_STATE_C,   /*  6 V – ready to charge    */
-    CP_STATE_D,   /*  3 V – ventilation needed */
-} cp_state_t;
-
-static const char *cp_state_name(cp_state_t s)
-{
-    switch (s) {
-        case CP_STATE_A: return "A (no vehicle, 12 V)";
-        case CP_STATE_B: return "B (vehicle connected, 9 V)";
-        case CP_STATE_C: return "C (ready to charge, 6 V)";
-        case CP_STATE_D: return "D (ventilation required, 3 V)";
-        default:         return "unknown";
-    }
-}
-
-static cp_state_t voltage_to_cp_state(int32_t cp_mv)
-{
-    if (cp_mv >= (CP_STATE_A_MV - CP_STATE_TOL_MV) && cp_mv <= (CP_STATE_A_MV + CP_STATE_TOL_MV)) return CP_STATE_A;
-    if (cp_mv >= (CP_STATE_B_MV - CP_STATE_TOL_MV) && cp_mv <= (CP_STATE_B_MV + CP_STATE_TOL_MV)) return CP_STATE_B;
-    if (cp_mv >= (CP_STATE_C_MV - CP_STATE_TOL_MV) && cp_mv <= (CP_STATE_C_MV + CP_STATE_TOL_MV)) return CP_STATE_C;
-    if (cp_mv >= (CP_STATE_D_MV - CP_STATE_TOL_MV) && cp_mv <= (CP_STATE_D_MV + CP_STATE_TOL_MV)) return CP_STATE_D;
-    return CP_STATE_UNKNOWN;
-}
 
 static void pwm_monitor_task(void *arg)
 {
@@ -146,10 +114,13 @@ static void pwm_monitor_task(void *arg)
     int64_t  last_report_us = esp_timer_get_time();
     bool     prev_high      = false;
     int64_t  last_rise_us   = 0;
-    int64_t  period_sum_us  = 0;
+    int64_t  period_sum_us   = 0;
     int64_t  high_sum_us    = 0;
-    uint32_t period_count   = 0;
-    int      peak_raw       = 0;
+    uint32_t period_count    = 0;
+    int64_t  adc_sum_raw     = 0;   /* sum of every raw ADC reading this second */
+    uint32_t n_conducting    = 0;   /* samples where diode is conducting (raw > noise floor) */
+    uint32_t n_total_samples = 0;
+    int      peak_raw        = 0;
     int      threshold_raw  = 2048; /* mid-scale starting point; updated each second */
 
     while (1) {
@@ -170,6 +141,11 @@ static void pwm_monitor_task(void *arg)
             int64_t sample_us = frame_start_us + (int64_t)i * us_per_sample;
             bool    high      = (raw > threshold_raw);
 
+            /* Accumulate every sample for average voltage */
+            adc_sum_raw += raw;
+            n_total_samples++;
+            if (raw > DIODE_CONDUCTING_THRESH_RAW) n_conducting++;
+
             if (high && !prev_high) {
                 /* Rising edge – measure period */
                 if (last_rise_us > 0) {
@@ -182,7 +158,7 @@ static void pwm_monitor_task(void *arg)
                 last_rise_us = sample_us;
                 peak_raw     = raw;
             } else if (high) {
-                /* Ongoing HIGH – track peak for voltage measurement */
+                /* Ongoing HIGH – track peak for threshold update */
                 if (raw > peak_raw) peak_raw = raw;
             } else if (!high && prev_high) {
                 /* Falling edge – accumulate high-time */
@@ -199,32 +175,66 @@ static void pwm_monitor_task(void *arg)
         }
         last_report_us = now_us;
 
-        if (period_count == 0) {
-            ESP_LOGI(PWM_MONITOR_TAG, "GPIO%d: no PWM signal detected", PWM_MONITOR_GPIO);
+        if (n_total_samples == 0) {
+    #ifdef DEBUG
+          ESP_LOGW(PWM_MONITOR_TAG, "GPIO%d: no ADC samples received this second", PWM_MONITOR_GPIO);
+    #endif
         } else {
-            ESP_LOGI(PWM_MONITOR_TAG, "GPIO%d: PWM signal detected", PWM_MONITOR_GPIO);
-            float freq_hz  = (float)period_count * 1e6f / (float)period_sum_us;
-            float duty_pct = (float)high_sum_us * 100.0f / (float)period_sum_us;
-
-            /* Convert peak ADC raw → mV at the pin → actual CP mV */
-            int adc_pin_mv = peak_raw; /* fallback if calibration unavailable */
+            /* ---- Voltage reconstruction (always, regardless of PWM detection) ---- */
+            int avg_raw    = (int)(adc_sum_raw / (int64_t)n_total_samples);
+            int avg_adc_mv = avg_raw; /* fallback if calibration unavailable */
             if (cali_ok) {
-                adc_cali_raw_to_voltage(cali_handle, peak_raw, &adc_pin_mv);
+                adc_cali_raw_to_voltage(cali_handle, avg_raw, &avg_adc_mv);
             }
-            int32_t    cp_mv = (int32_t)((float)adc_pin_mv * CP_VOLTAGE_DIVIDER);
-            cp_state_t state = voltage_to_cp_state(cp_mv);
+            int peak_adc_mv = peak_raw;
+            if (cali_ok) {
+                adc_cali_raw_to_voltage(cali_handle, peak_raw, &peak_adc_mv);
+            }
 
-            if (!pwm_signal_valid &&
-                freq_hz >= 500.0f && freq_hz <= 2000.0f &&
-                duty_pct >= 5.0f  && duty_pct <= 90.0f) {
+            float vf_correction_mv = (float)DIODE_1N4148WS_VF_MV
+                                     * ((float)n_conducting / (float)n_total_samples);
+            float avg_div_mv    = (float)avg_adc_mv + vf_correction_mv;
+            int32_t avg_original_mv = (int32_t)(avg_div_mv * CP_DIVIDER_FACTOR);
+
+            if (!pwm_signal_valid && avg_original_mv > SIGNAL_DETECT_THRESHOLD_MV) {
                 pwm_signal_valid = true;
             }
 
             ESP_LOGI(PWM_MONITOR_TAG,
-                     "GPIO%d: freq=%.1f Hz  duty=%.1f%%  peak=%d mV (CP ~%" PRId32 " mV)"
-                     "  state=%s  valid=%s",
-                     PWM_MONITOR_GPIO, freq_hz, duty_pct, adc_pin_mv, cp_mv,
-                     cp_state_name(state), pwm_signal_valid ? "yes" : "no");
+                 "[VOLT] avg_original=%" PRId32 " mV (threshold=%d mV) valid=%s",
+                 avg_original_mv, SIGNAL_DETECT_THRESHOLD_MV,
+                 pwm_signal_valid ? "yes" : "no");
+
+            /* ---- Frequency (only if edges were detected) ---- */
+      #ifdef DEBUG
+            if (period_count > 0) {
+                float freq_hz = (float)period_count * 1e6f / (float)period_sum_us;
+                ESP_LOGI(PWM_MONITOR_TAG,
+                         "[PWM]  freq=%.1f Hz  periods=%lu",
+                         freq_hz, (unsigned long)period_count);
+            } else {
+                ESP_LOGI(PWM_MONITOR_TAG, "[PWM]  no edges detected (threshold_raw=%d)", threshold_raw);
+            }
+
+            /* ---- ADC raw stats ---- */
+            ESP_LOGI(PWM_MONITOR_TAG,
+                     "[ADC]  avg_raw=%d  peak_raw=%d  threshold_raw=%d"
+                     "  conducting=%lu/%lu (%.1f%%)",
+                     avg_raw, peak_raw, threshold_raw,
+                     (unsigned long)n_conducting, (unsigned long)n_total_samples,
+                     100.0f * (float)n_conducting / (float)n_total_samples);
+
+            /* ---- Voltage reconstruction steps ---- */
+            ESP_LOGI(PWM_MONITOR_TAG,
+                     "[VOLT] avg_adc=%.0f mV  +Vf_corr=%.0f mV  =>  avg_divider=%.0f mV"
+                     "  =>  avg_original=%" PRId32 " mV  valid=%s",
+                     (float)avg_adc_mv, vf_correction_mv, avg_div_mv,
+                     avg_original_mv, pwm_signal_valid ? "yes" : "no");
+
+            ESP_LOGI(PWM_MONITOR_TAG,
+                     "[VOLT] peak_adc=%d mV  =>  peak_original=%.0f mV",
+                     peak_adc_mv, (float)peak_adc_mv * CP_DIVIDER_FACTOR + (float)DIODE_1N4148WS_VF_MV * CP_DIVIDER_FACTOR);
+      #endif
 
             /* Update threshold to 50 % of observed HIGH peak for next second */
             if (peak_raw > 0) {
@@ -233,10 +243,13 @@ static void pwm_monitor_task(void *arg)
         }
 
         /* Reset per-second accumulators */
-        period_sum_us = 0;
-        high_sum_us   = 0;
-        period_count  = 0;
-        peak_raw      = 0;
+        period_sum_us   = 0;
+        high_sum_us     = 0;
+        period_count    = 0;
+        adc_sum_raw     = 0;
+        n_conducting    = 0;
+        n_total_samples = 0;
+        peak_raw        = 0;
     }
 
     /* Unreachable – clean up if ever reached */
@@ -296,13 +309,7 @@ static void cp_pwm_init(void) {
 void cp_pwm_update(uint8_t amp) {
   uint32_t duty = amp_to_duty(amp);
   ESP_LOGI(LOG_TAG_MAIN, "cp_pwm_update: amp=%d duty=%lu", amp, duty);
-  if (amp == 0) {
-    gpio_set_direction(OPTO_GND_GPIO, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(OPTO_GND_GPIO, GPIO_FLOATING);
-  } else {
-    gpio_set_direction(OPTO_GND_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_level(OPTO_GND_GPIO, 0);
-  }
+
   esp_err_t err = ledc_set_duty(CP_PWM_MODE, CP_PWM_CHANNEL, duty);
   if (err != ESP_OK) {
     ESP_LOGE(LOG_TAG_MAIN, "ledc_set_duty failed: %s", esp_err_to_name(err));
@@ -331,15 +338,6 @@ bool run_diagnostics() {
 }
 
 void app_main(void) {
-  gpio_config_t opto_cfg = {
-      .pin_bit_mask = (1ULL << OPTO_GND_GPIO),
-      .mode         = GPIO_MODE_INPUT,
-      .pull_up_en   = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type    = GPIO_INTR_DISABLE,
-  };
-  ESP_ERROR_CHECK(gpio_config(&opto_cfg));
-
   cp_pwm_init();
 
   // Initialize NVS first so the calibration offset is available before cp_pwm_init
@@ -368,19 +366,22 @@ void app_main(void) {
   TaskHandle_t pwm_monitor_handle = NULL;
   xTaskCreate(pwm_monitor_task, "pwm_monitor", 4096, NULL, 5, &pwm_monitor_handle);
 
-  vTaskDelay(pdMS_TO_TICKS(5000));
+  vTaskDelay(pdMS_TO_TICKS(2000));
 
-  if (!pwm_signal_valid) {
+  if (pwm_signal_valid) {
+  // if(true) { // test mode, simulate PWM detected
+    if (pwm_monitor_handle != NULL) {
+      vTaskDelete(pwm_monitor_handle);
+      pwm_monitor_handle = NULL;
+    }
+    ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init", PWM_MONITOR_GPIO);
+  } else {
     if (pwm_monitor_handle != NULL) {
       vTaskDelete(pwm_monitor_handle);
       pwm_monitor_handle = NULL;
     }
     cp_pwm_update(6);
     ESP_LOGI(LOG_TAG_MAIN, "No valid PWM detected on GPIO%d – initializing CP PWM", PWM_MONITOR_GPIO);
-
-  } else {
-    ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init",
-             PWM_MONITOR_GPIO);
   }
 
   // check which partition is running

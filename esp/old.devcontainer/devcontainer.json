@@ -1,0 +1,39 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the README at:
+// https://github.com/microsoft/vscode-dev-containers/tree/v0.183.0/containers/ubuntu
+{
+	"name": "ESP-IDF QEMU",
+	"image": "espressif/idf:latest",
+	// Add the IDs of extensions you want installed when the container is created
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	/* the path of workspace folder to be opened after container is running
+	 */
+	"workspaceFolder": "/workspace",
+	"mounts": [
+		"source=extensionCache,target=/root/.vscode-server/extensions,type=volume",
+		"source=/dev,target=/dev,type=bind"
+	],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"espressif.esp-idf-extension@1.8.1",
+				"ms-vscode.cpptools",
+				"mhutchie.git-graph",
+				"waderyan.gitblame",
+				"xaver.clang-format",
+				"rherrmannr.code-coverage-lcov",
+				"twxs.cmake",
+				"ms-vscode.cmake-tools",
+				"ms-vscode.makefile-tools",
+				"ms-azuretools.vscode-docker",
+				"ms-vscode.cpptools-extension-pack",
+				"ryanluker.vscode-coverage-gutters"
+			],
+			"settings": [
+                "coverage-gutters.coverageBaseDir": "/workspace/tests/",
+                "coverage-gutters.coverageReportFileName": "coverage.xml",
+				"coverage-gutters.ignoredPathGlobs": "**,!/workspace/apps/**"
+			]
+		}
+	},
+	"runArgs": ["--privileged", "--device-cgroup-rule=c 166:* rmw",  "--group-add=plugdev"]
+}
