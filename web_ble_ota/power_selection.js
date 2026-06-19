@@ -475,15 +475,10 @@
     function updateOTAProgress(percent) {
         if (fwProgressText) fwProgressText.textContent = `${Math.round(percent)}%`;
         if (fwProgressRing) {
-            // Simple clip-path update for progress
-            const deg = (percent / 100) * 360;
-            if (percent <= 50) {
-                fwProgressRing.style.clipPath = `polygon(50% 50%, 50% 0%, ${50 + 50 * Math.tan(deg * Math.PI / 180)}% 0%, 50% 50%)`;
-                // Actually, let's use a simpler approach or just text for now if clip-path is tricky
-                // Given the initial style: clip-path: polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%);
-            }
-            // For a real ring, we'd use stroke-dasharray on an SVG, but sticking to existing structure:
-            fwProgressRing.style.opacity = percent / 100;
+            // SVG circle circumference: 2 * π * 92 ≈ 578
+            const circumference = 2 * Math.PI * 92;
+            const strokeDasharray = (percent / 100) * circumference;
+            fwProgressRing.style.strokeDasharray = `${strokeDasharray}, ${circumference}`;
         }
     }
 

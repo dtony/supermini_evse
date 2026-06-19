@@ -186,11 +186,16 @@
             <section class="mb-8 text-center">
                 <div id="update-section-container" class="hidden">
                     <div class="mb-6 flex justify-center">
-                        <div class="relative flex size-44 items-center justify-center rounded-full border-8 border-[#3b4754]">
-                            <div id="fw-progress-ring" class="absolute inset-0 rounded-full border-8 border-[var(--primary-color)]" style="clip-path: polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%);"></div>
-                            <div class="text-center">
-                                <p class="text-sm text-[#9dabb9]">Progression</p>
-                                <p id="fw-progress-text" class="text-4xl font-bold text-white">0%</p>
+                        <div class="relative flex size-44 items-center justify-center">
+                            <svg width="200" height="200" viewBox="0 0 200 200" style="transform: rotate(-90deg);">
+                                <circle cx="100" cy="100" r="92" fill="none" stroke="#3b4754" stroke-width="8"/>
+                                <circle id="fw-progress-ring" cx="100" cy="100" r="92" fill="none" stroke="var(--primary-color)" stroke-width="8" stroke-linecap="round" style="stroke-dasharray: 0, 578; transition: stroke-dasharray 0.3s ease;"/>
+                            </svg>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <div class="text-center">
+                                    <p class="text-sm text-[#9dabb9]">Progression</p>
+                                    <p id="fw-progress-text" class="text-4xl font-bold text-white">0%</p>
+                                </div>
                             </div>
                         </div>
                     </div>
