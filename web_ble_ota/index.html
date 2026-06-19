@@ -85,6 +85,17 @@
     #ble-connect-btn.disabled { opacity:.5; cursor:default; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .animate-spin { animation: spin 0.9s linear infinite; }
+    .ota-badge {
+        position: absolute;
+        top: 0.1rem;
+        right: 0.15rem;
+        width: 0.62rem;
+        height: 0.62rem;
+        border-radius: 999px;
+        background: #ef4444;
+        border: 2px solid #1c2127;
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+    }
     </style>
 </head>
 <body class="bg-gray-900">
@@ -170,6 +181,18 @@
 
         <!-- Vue Firmware cachée -->
         <div id="view-firmware" class="hidden flex flex-col flex-1 overflow-auto px-1 pb-4">
+            <!-- Écran succès post-OTA -->
+            <div id="ota-success-screen" class="hidden flex flex-col flex-1 items-center justify-center gap-6 py-10 px-4 text-center">
+                <span class="material-symbols-outlined text-green-500" style="font-size:4rem;">check_circle</span>
+                <div>
+                    <h2 class="text-white font-bold text-2xl mb-2">Mise à jour terminée !</h2>
+                    <p class="text-[#9dabb9] text-sm leading-relaxed">Le device redémarre. Reconnectez-vous lorsqu'il sera prêt.</p>
+                </div>
+                <button id="btn-ota-reconnect" class="confirm-btn flex min-w-[200px] cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl h-14 px-10 bg-[var(--primary-color)] text-white font-bold leading-tight tracking-[0.015em] hover:bg-blue-600 transition-colors">
+                    <span class="material-symbols-outlined" style="font-size:1.3rem;">bluetooth_searching</span>
+                    <span>Se reconnecter</span>
+                </button>
+            </div>
             <section class="mb-6 mt-2">
                 <h2 class="text-white font-bold text-2xl mb-3">Informations firmware</h2>
                 <div class="space-y-3 rounded-lg bg-[#1c2127] p-4">
@@ -247,8 +270,9 @@
                     <p class="nav-label leading-tight tracking-[0.015em]">Paramètres</p>
                 </a>
                 <a id="nav-settings" class="nav-item just flex flex-1 flex-col items-center justify-end gap-1" href="#">
-                    <div class="flex items-center justify-center">
+                    <div class="relative flex items-center justify-center">
                         <span class="material-symbols-outlined foot-icon">system_update</span>
+                        <span id="ota-update-badge" class="ota-badge hidden" aria-label="Mise a jour disponible"></span>
                     </div>
                     <p class="nav-label leading-tight tracking-[0.015em]">OTA</p>
                 </a>

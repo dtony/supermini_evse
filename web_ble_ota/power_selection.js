@@ -131,6 +131,7 @@
     const bleText = document.getElementById('ble-status-text');
     const confirmBtn = document.getElementById('btn-confirm-power');
     let bleDevice = null; let bleServer = null; let powerChar = null; const TARGET_NAME = 'Super Mini EVSE';
+    let otaDisconnectExpected = false;
     // UUIDs fournis pour service EVSE et caractéristique power
     const EVSE_SERVICE_UUID = 'de8305b5-4e28-4953-8eee-b81e7fa03e39';
     const POWER_CHAR_UUID = '594fdcf8-aa5f-4a05-9ecd-5777c57d700c';
@@ -162,11 +163,19 @@
     const btnStartFirmware = document.getElementById('btn-start-firmware');
     const fwCurrentEl = document.getElementById('fw-current');
     const fwAvailableEl = document.getElementById('fw-available');
+    const otaUpdateBadge = document.getElementById('ota-update-badge');
+    const otaSuccessScreen = document.getElementById('ota-success-screen');
+    const btnOtaReconnect = document.getElementById('btn-ota-reconnect');
     const fwProgressText = document.getElementById('fw-progress-text');
     const fwProgressRing = document.getElementById('fw-progress-ring');
     const loaderEl = document.getElementById('power-loader');
     const loaderText = document.getElementById('power-loader-text');
     let loaderCount = 0;
+
+    function setOTABadgeVisible(visible) {
+        if (!otaUpdateBadge) return;
+        otaUpdateBadge.classList.toggle('hidden', !visible);
+    }
 
     function showPowerLoader(text) {
         loaderCount++;
@@ -222,10 +231,13 @@
         setPowerControlsEnabled(cfg.enable);
 
         if (state === 'connected') {
+            // Trigger both reads immediately on BLE connect so OTA badge/status is
+            // available even before opening the OTA tab.
             readFirmwareVersion();
-            // We'll trigger the update check inside readFirmwareVersion or after
+            fetchLatestRelease();
         } else {
             // On hide update elements if disconnected
+            setOTABadgeVisible(false);
             if (updateSectionContainer) updateSectionContainer.classList.add('hidden');
             if (btnStartFirmware) btnStartFirmware.classList.add('hidden');
         }
@@ -304,6 +316,7 @@
                 updateAvailableMsg?.classList.add('hidden');
                 updateUpToDateMsg?.classList.remove('hidden');
                 btnStartFirmware?.classList.add('hidden');
+                setOTABadgeVisible(false);
             } else {
                 // Update available: show progress, show "update available" message, and start button
                 const progressDiv = updateSectionContainer.querySelector('.mb-6.flex.justify-center');
@@ -312,10 +325,12 @@
                 updateAvailableMsg?.classList.remove('hidden');
                 updateUpToDateMsg?.classList.add('hidden');
                 btnStartFirmware?.classList.remove('hidden');
+                setOTABadgeVisible(true);
             }
         } catch (e) {
             console.error('[UpdateCheck] Erreur:', e);
             updateSectionContainer.classList.add('hidden');
+            setOTABadgeVisible(false);
         }
     }
 
@@ -365,7 +380,16 @@
                 optionalServices: [EVSE_SERVICE_UUID, DEVICE_INFO_SERVICE_UUID, OTA_SERVICE_UUID] 
             });
             if (!bleDevice || bleDevice.name !== TARGET_NAME) throw new Error('Device non conforme');
-            bleDevice.addEventListener('gattserverdisconnected', () => { console.log('[BLE] Déconnecté'); setBLEState('disconnected'); });
+            bleDevice.addEventListener('gattserverdisconnected', () => {
+                if (otaDisconnectExpected) {
+                    // Déconnexion normale après OTA — ne pas afficher d'erreur
+                    otaDisconnectExpected = false;
+                    bleDevice = null; bleServer = null;
+                    console.log('[BLE] Déconnexion post-OTA attendue');
+                    return;
+                }
+                console.log('[BLE] Déconnecté'); setBLEState('disconnected');
+            });
             bleServer = await bleDevice.gatt.connect();
             console.log('[BLE] Connecté:', bleDevice.name || '(sans nom)');
 
@@ -403,6 +427,34 @@
         DONE_NAK: 0x06,
     };
 
+    const otaControlWaiters = [];
+
+    function waitForOTAControlCode(expectedCodes, timeoutMs = 2500) {
+        return new Promise((resolve, reject) => {
+            const expected = Array.isArray(expectedCodes) ? expectedCodes : [expectedCodes];
+            const waiter = {
+                expected,
+                resolve: (code) => {
+                    clearTimeout(waiter.timer);
+                    resolve(code);
+                },
+                reject: (err) => {
+                    clearTimeout(waiter.timer);
+                    reject(err);
+                },
+                timer: null
+            };
+
+            waiter.timer = setTimeout(() => {
+                const idx = otaControlWaiters.indexOf(waiter);
+                if (idx >= 0) otaControlWaiters.splice(idx, 1);
+                reject(new Error(`Timeout notification OTA (${expected.join(',')})`));
+            }, timeoutMs);
+
+            otaControlWaiters.push(waiter);
+        });
+    }
+
     function handleOTAControlNotification(event) {
         const value = event.target.value;
         const code = value.getUint8(0);
@@ -413,6 +465,14 @@
             [OPCODES.DONE_NAK]: 'OTA done NAK'
         };
         console.log('[BLE] OTA Notification:', map[code] || `Code ${code}`);
+
+        for (let i = otaControlWaiters.length - 1; i >= 0; i--) {
+            const waiter = otaControlWaiters[i];
+            if (waiter.expected.includes(code)) {
+                otaControlWaiters.splice(i, 1);
+                waiter.resolve(code);
+            }
+        }
     }
 
     async function startOTAUpdate() {
@@ -463,11 +523,18 @@
             
             // 3. Perform the OTA streaming
             await performOTAStreaming(arrayBuffer);
-            
-            // Success
+
+            // Déconnecter volontairement avant que le device redémarre
             hidePowerLoader();
-            alert('Mise à jour réussie ! Le device va redémarrer.');
-            location.reload();
+            otaDisconnectExpected = true;
+            await disconnectBLE();
+
+            // Afficher l'écran de succès dans la vue firmware
+            updateOTAProgress(100);
+            setOTABadgeVisible(false);
+            if (otaSuccessScreen) otaSuccessScreen.classList.remove('hidden');
+            if (updateSectionContainer) updateSectionContainer.classList.add('hidden');
+            if (actionsFirmware) actionsFirmware.classList.add('hidden');
         } catch (e) {
             console.error('[OTA] Erreur:', e);
             alert(`Erreur de mise à jour: ${e.message}`);
@@ -504,16 +571,18 @@
         // Envoyer la taille du paquet
         await otaDataChar.writeValue(new Uint16Array([packetSize]));
         // Envoyer la requête OTA
+        const requestAckPromise = waitForOTAControlCode([OPCODES.REQUEST_ACK, OPCODES.REQUEST_NAK], 3000);
         await otaControlChar.writeValue(OPCODES.REQUEST);
-        
-        // Attendre l'ACK
-        await new Promise(r => setTimeout(r, 1000));
+        const requestCode = await requestAckPromise;
+        if (requestCode === OPCODES.REQUEST_NAK) {
+            throw new Error('OTA refusé par le device (REQUEST_NAK)');
+        }
 
         for (let i = 0; i < totalPackets; i++) {
             const start = i * packetSize;
             const end = Math.min(start + packetSize, arrayBuffer.byteLength);
             const chunk = arrayBuffer.slice(start, end);
-            
+
             await otaDataChar.writeValue(new Uint8Array(chunk));
             
             const percent = ((i + 1) / totalPackets) * 100;
@@ -526,11 +595,44 @@
         }
 
         // Envoyer le DONE
-        await otaControlChar.writeValue(OPCODES.DONE);
+        const doneAckPromise = waitForOTAControlCode([OPCODES.DONE_ACK, OPCODES.DONE_NAK], 2500);
+        let doneWriteError = null;
+        try {
+            await otaControlChar.writeValue(OPCODES.DONE);
+        } catch (e) {
+            doneWriteError = e;
+            console.warn('[OTA] Erreur sur write DONE:', e?.message || e);
+        }
+
+        let doneCode = null;
+        try {
+            doneCode = await doneAckPromise;
+        } catch (_) {
+            doneCode = null;
+        }
+
+        if (doneCode === OPCODES.DONE_NAK) {
+            throw new Error('OTA refusé par le device (DONE_NAK)');
+        }
+
+        if (doneCode !== OPCODES.DONE_ACK && doneWriteError) {
+            const disconnected = !bleDevice?.gatt?.connected;
+            if (!disconnected) {
+                throw doneWriteError;
+            }
+            console.log('[OTA] Device déjà déconnecté après DONE, OTA considéré terminé');
+        }
+
         console.log('[OTA] Streaming terminé');
     }
 
     btnStartFirmware?.addEventListener('click', startOTAUpdate);
+
+    btnOtaReconnect?.addEventListener('click', () => {
+        if (otaSuccessScreen) otaSuccessScreen.classList.add('hidden');
+        if (updateSectionContainer) updateSectionContainer.classList.remove('hidden');
+        connectBLE();
+    });
 
     async function writePower(amps) {
         if (!powerChar) { console.warn('[BLE] Caractéristique power non disponible pour écriture'); return; }
