@@ -420,6 +420,12 @@
         if (targetVersion === '-' || targetVersion === '???') return;
         
         try {
+            // Disable button and show "Mise à jour en cours"
+            btnStartFirmware.disabled = true;
+            btnStartFirmware.classList.add('opacity-50', 'cursor-not-allowed');
+            const btnSpan = btnStartFirmware.querySelector('span.truncate');
+            if (btnSpan) btnSpan.textContent = 'Mise à jour en cours';
+            
             // 1. Fetch release info and the asset via GitHub API
             showPowerLoader('Recherche du firmware...');
             
@@ -465,9 +471,11 @@
         } catch (e) {
             console.error('[OTA] Erreur:', e);
             alert(`Erreur de mise à jour: ${e.message}`);
-        } finally {
+            // Re-enable button on error
             btnStartFirmware.disabled = false;
             btnStartFirmware.classList.remove('opacity-50', 'cursor-not-allowed');
+            const btnSpan = btnStartFirmware.querySelector('span.truncate');
+            if (btnSpan) btnSpan.textContent = 'Démarrer la mise à jour';
             hidePowerLoader();
         }
     }
