@@ -20,7 +20,7 @@
 /* GPIO used to monitor an incoming PWM signal.
  * Must be an ADC-capable pin: on ESP32-C3, ADC1 covers GPIO0–GPIO5 only.
  * GPIO3 = ADC1_CH3 is used here. */
-#define PWM_MONITOR_GPIO 3
+// #define PWM_MONITOR_GPIO 3
 
 /* GPIO used to generate the CP PWM signal */
 #define CP_PWM_GPIO       4
@@ -106,7 +106,7 @@ static void pwm_monitor_task(void *arg)
 
     ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
     ESP_LOGI(PWM_MONITOR_TAG, "ADC continuous started on GPIO%d (ADC1_CH%d) @ %d S/s",
-             PWM_MONITOR_GPIO, PWM_MONITOR_ADC_CHANNEL, PWM_MONITOR_SAMPLE_FREQ_HZ);
+             ADC_CHANNEL_3, PWM_MONITOR_ADC_CHANNEL, PWM_MONITOR_SAMPLE_FREQ_HZ);
 
     /* ---- Per-second measurement accumulators ---- */
     static uint8_t              frame_buf[PWM_MONITOR_FRAME_SIZE];
@@ -177,7 +177,7 @@ static void pwm_monitor_task(void *arg)
 
         if (n_total_samples == 0) {
     #ifdef DEBUG
-          ESP_LOGW(PWM_MONITOR_TAG, "GPIO%d: no ADC samples received this second", PWM_MONITOR_GPIO);
+          ESP_LOGW(PWM_MONITOR_TAG, "GPIO%d: no ADC samples received this second", ADC_CHANNEL_3);
     #endif
         } else {
             /* ---- Voltage reconstruction (always, regardless of PWM detection) ---- */
@@ -374,14 +374,14 @@ void app_main(void) {
       vTaskDelete(pwm_monitor_handle);
       pwm_monitor_handle = NULL;
     }
-    ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init", PWM_MONITOR_GPIO);
+    ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init", ADC_CHANNEL_3);
   } else {
     if (pwm_monitor_handle != NULL) {
       vTaskDelete(pwm_monitor_handle);
       pwm_monitor_handle = NULL;
     }
     cp_pwm_update(6);
-    ESP_LOGI(LOG_TAG_MAIN, "No valid PWM detected on GPIO%d – initializing CP PWM", PWM_MONITOR_GPIO);
+    ESP_LOGI(LOG_TAG_MAIN, "No valid PWM detected on GPIO%d – initializing CP PWM", ADC_CHANNEL_3);
   }
 
   // check which partition is running
