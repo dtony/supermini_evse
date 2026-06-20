@@ -171,6 +171,48 @@
     const loaderEl = document.getElementById('power-loader');
     const loaderText = document.getElementById('power-loader-text');
     let loaderCount = 0;
+    let wakeLockSentinel = null;
+    let otaWakeLockRequested = false;
+
+    async function requestOTAWakeLock() {
+        if (!otaWakeLockRequested || !('wakeLock' in navigator) || document.visibilityState !== 'visible') {
+            return;
+        }
+        try {
+            wakeLockSentinel = await navigator.wakeLock.request('screen');
+            wakeLockSentinel.addEventListener('release', () => {
+                wakeLockSentinel = null;
+                console.log('[WakeLock] Relache');
+            }, { once: true });
+            console.log('[WakeLock] Active pendant OTA');
+        } catch (e) {
+            wakeLockSentinel = null;
+            console.warn('[WakeLock] Impossible d\'activer le verrou d\'ecran:', e?.message || e);
+        }
+    }
+
+    async function enableOTAWakeLock() {
+        otaWakeLockRequested = true;
+        await requestOTAWakeLock();
+    }
+
+    async function releaseOTAWakeLock() {
+        otaWakeLockRequested = false;
+        if (!wakeLockSentinel) return;
+        try {
+            await wakeLockSentinel.release();
+        } catch (e) {
+            console.warn('[WakeLock] Echec de relache:', e?.message || e);
+        } finally {
+            wakeLockSentinel = null;
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (otaWakeLockRequested && document.visibilityState === 'visible' && !wakeLockSentinel) {
+            requestOTAWakeLock();
+        }
+    });
 
     function setOTABadgeVisible(visible) {
         if (!otaUpdateBadge) return;
@@ -480,6 +522,8 @@
         if (targetVersion === '-' || targetVersion === '???') return;
         
         try {
+            await enableOTAWakeLock();
+
             // Disable button and show "Mise à jour en cours"
             btnStartFirmware.disabled = true;
             btnStartFirmware.classList.add('opacity-50', 'cursor-not-allowed');
@@ -544,6 +588,8 @@
             const btnSpan = btnStartFirmware.querySelector('span.truncate');
             if (btnSpan) btnSpan.textContent = 'Démarrer la mise à jour';
             hidePowerLoader();
+        } finally {
+            await releaseOTAWakeLock();
         }
     }
 
