@@ -1,4 +1,5 @@
 #include "driver/ledc.h"
+#include "driver/gpio.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_continuous.h"
@@ -16,6 +17,8 @@
 #include "version.h"
 
 #define LOG_TAG_MAIN "main"
+
+#define DEBUG 1
 
 /* GPIO used to monitor an incoming PWM signal.
  * Must be an ADC-capable pin: on ESP32-C3, ADC1 covers GPIO0–GPIO5 only.
@@ -55,11 +58,68 @@ uint16_t evse_detect_timeout_ms = 2000;
 #define DIODE_CONDUCTING_THRESH_RAW 100   /* ADC raw noise floor; above = diode conducting */
 #define SIGNAL_DETECT_THRESHOLD_MV  3000
 
+/* Second pilot-detection path: digital input capture on GPIO7. */
+#define PWM_MONITOR_DIGITAL_GPIO       7
+#define PILOT_PWM_MIN_FREQ_HZ          500.0f
+#define PILOT_PWM_MAX_FREQ_HZ          2000.0f
+#define PILOT_PWM_MIN_DUTY_PERCENT     5.0f
+
 /* Set to true when a valid PWM (500–2 kHz, 5–90 % duty) is detected; never cleared */
 static volatile bool pwm_signal_valid = false;
 
+/* ---- GPIO7 ISR data structure for edge-triggered timing ---- */
+typedef struct {
+    int64_t last_rise_us;      /* timestamp of last rising edge */
+    int64_t high_start_us;     /* timestamp of last rising edge (for high-time calculation) */
+    int64_t period_sum_us;     /* sum of periods over measurement window */
+    int64_t high_sum_us;       /* sum of high times over measurement window */
+    uint32_t period_count;     /* number of complete periods detected */
+} gpio_pwm_data_t;
+
+static volatile gpio_pwm_data_t gpio7_pwm_data = {0};
+static portMUX_TYPE gpio7_mux = portMUX_INITIALIZER_UNLOCKED;
+
+/* ISR handler: captures edge timestamps with nanosecond precision */
+static void IRAM_ATTR gpio_pwm_isr(void *arg) {
+    int64_t now_us = esp_timer_get_time();
+    uint32_t gpio_state = gpio_get_level(PWM_MONITOR_DIGITAL_GPIO);
+
+    portENTER_CRITICAL_ISR(&gpio7_mux);
+    if (gpio_state) {
+        /* Rising edge: measure period from last rising edge */
+        if (gpio7_pwm_data.last_rise_us > 0) {
+            int64_t period = now_us - gpio7_pwm_data.last_rise_us;
+            if (period > 0 && period < 10000000LL) {
+                gpio7_pwm_data.period_sum_us += period;
+                gpio7_pwm_data.period_count++;
+            }
+        }
+        gpio7_pwm_data.last_rise_us = now_us;
+        gpio7_pwm_data.high_start_us = now_us;
+    } else {
+        /* Falling edge: accumulate high-time */
+        if (gpio7_pwm_data.high_start_us > 0) {
+            gpio7_pwm_data.high_sum_us += now_us - gpio7_pwm_data.high_start_us;
+            gpio7_pwm_data.high_start_us = 0;
+        }
+    }
+    portEXIT_CRITICAL_ISR(&gpio7_mux);
+}
+
 static void pwm_monitor_task(void *arg)
 {
+  /* Configure GPIO7 as input with interrupt on both rising and falling edges */
+  gpio_config_t dig_gpio_cfg = {
+    .pin_bit_mask = (1ULL << PWM_MONITOR_DIGITAL_GPIO),
+    .mode = GPIO_MODE_INPUT,
+    .pull_up_en = GPIO_PULLUP_DISABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_ANYEDGE,  /* Trigger on both rising and falling edges */
+  };
+  ESP_ERROR_CHECK(gpio_config(&dig_gpio_cfg));
+  ESP_ERROR_CHECK(gpio_isr_handler_add(PWM_MONITOR_DIGITAL_GPIO, gpio_pwm_isr, NULL));
+  ESP_LOGI(PWM_MONITOR_TAG, "GPIO7 interrupt handler registered for edge-triggered PWM detection");
+
     /* ---- Initialise ADC continuous (DMA) driver ---- */
     adc_continuous_handle_t adc_handle = NULL;
     adc_continuous_handle_cfg_t handle_cfg = {
@@ -125,6 +185,11 @@ static void pwm_monitor_task(void *arg)
     int      peak_raw        = 0;
     int      threshold_raw  = 2048; /* mid-scale starting point; updated each second */
 
+    /* Per-second accumulators for digital path (populated by ISR) */
+    int64_t  sec_dig_period_sum_us = 0;
+    int64_t  sec_dig_high_sum_us  = 0;
+    uint32_t sec_dig_period_count = 0;
+
     while (1) {
         uint32_t out_len = 0;
         esp_err_t ret = adc_continuous_read(adc_handle, frame_buf,
@@ -177,6 +242,21 @@ static void pwm_monitor_task(void *arg)
         }
         last_report_us = now_us;
 
+        /* Snapshot ISR data atomically then reset for next window */
+        taskENTER_CRITICAL(&gpio7_mux);
+        sec_dig_period_sum_us = gpio7_pwm_data.period_sum_us;
+        sec_dig_high_sum_us   = gpio7_pwm_data.high_sum_us;
+        sec_dig_period_count  = gpio7_pwm_data.period_count;
+        gpio7_pwm_data.period_sum_us  = 0;
+        gpio7_pwm_data.high_sum_us    = 0;
+        gpio7_pwm_data.period_count   = 0;
+        /* Reset timestamps so the first edge of the new window is not measured
+         * against a stale timestamp from ~1 s ago, which would yield a bogus
+         * ~1 Hz period and halve the computed frequency below the 500 Hz threshold. */
+        gpio7_pwm_data.last_rise_us   = 0;
+        gpio7_pwm_data.high_start_us  = 0;
+        taskEXIT_CRITICAL(&gpio7_mux);
+
         if (n_total_samples == 0) {
     #ifdef DEBUG
           ESP_LOGW(PWM_MONITOR_TAG, "GPIO%d: no ADC samples received this second", ADC_CHANNEL_3);
@@ -197,8 +277,23 @@ static void pwm_monitor_task(void *arg)
                                      * ((float)n_conducting / (float)n_total_samples);
             float avg_div_mv    = (float)avg_adc_mv + vf_correction_mv;
             int32_t avg_original_mv = (int32_t)(avg_div_mv * CP_DIVIDER_FACTOR);
+            bool analog_detected_this_second = (avg_original_mv > SIGNAL_DETECT_THRESHOLD_MV);
 
-            if (!pwm_signal_valid && avg_original_mv > SIGNAL_DETECT_THRESHOLD_MV) {
+            float dig_freq_hz = 0.0f;
+            float dig_duty_pct = 0.0f;
+            bool digital_detected_this_second = false;
+            if (sec_dig_period_count > 0 && sec_dig_period_sum_us > 0) {
+              dig_freq_hz = (float)sec_dig_period_count * 1e6f / (float)sec_dig_period_sum_us;
+              dig_duty_pct = 100.0f * (float)sec_dig_high_sum_us / (float)sec_dig_period_sum_us;
+              if (dig_freq_hz >= PILOT_PWM_MIN_FREQ_HZ &&
+                dig_freq_hz <= PILOT_PWM_MAX_FREQ_HZ &&
+                dig_duty_pct > PILOT_PWM_MIN_DUTY_PERCENT) {
+                digital_detected_this_second = true;
+              }
+            }
+
+            if (!pwm_signal_valid &&
+              (analog_detected_this_second || digital_detected_this_second)) {
                 pwm_signal_valid = true;
             }
 
@@ -236,6 +331,20 @@ static void pwm_monitor_task(void *arg)
             ESP_LOGI(PWM_MONITOR_TAG,
                      "[VOLT] peak_adc=%d mV  =>  peak_original=%.0f mV",
                      peak_adc_mv, (float)peak_adc_mv * CP_DIVIDER_FACTOR + (float)DIODE_1N4148WS_VF_MV * CP_DIVIDER_FACTOR);
+
+            if (sec_dig_period_count > 0) {
+              ESP_LOGI(PWM_MONITOR_TAG,
+                   "[DIG]  gpio=%d (ISR) freq=%.1f Hz duty=%.1f%% periods=%lu detected=%s",
+                   PWM_MONITOR_DIGITAL_GPIO,
+                   dig_freq_hz,
+                   dig_duty_pct,
+                   (unsigned long)sec_dig_period_count,
+                   digital_detected_this_second ? "yes" : "no");
+            } else {
+              ESP_LOGI(PWM_MONITOR_TAG,
+                   "[DIG]  gpio=%d (ISR) no edges detected",
+                   PWM_MONITOR_DIGITAL_GPIO);
+            }
       #endif
 
             /* Update threshold to 50 % of observed HIGH peak for next second */
@@ -244,7 +353,7 @@ static void pwm_monitor_task(void *arg)
             }
         }
 
-        /* Reset per-second accumulators */
+        /* Reset per-second accumulators (ADC path only; digital path reset above) */
         period_sum_us   = 0;
         high_sum_us     = 0;
         period_count    = 0;
@@ -360,6 +469,9 @@ bool run_diagnostics() {
 }
 
 void app_main(void) {
+  /* Initialize GPIO ISR service for edge-triggered GPIO handlers */
+  ESP_ERROR_CHECK(gpio_install_isr_service(0));
+
   cp_pwm_init();
 
   // Initialize NVS first so the calibration offset is available before cp_pwm_init
