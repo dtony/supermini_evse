@@ -57,16 +57,27 @@ static const ble_uuid128_t gatt_svr_chr_current_amp_uuid =
     BLE_UUID128_INIT(0x0c, 0x70, 0x7d, 0xc5, 0x77, 0x57, 0xcd, 0x9e, 0x05, 0x4a,
                      0x5f, 0xaa, 0xf8, 0xdc, 0x4f, 0x59);
 
-// characteristic: PWM Calibration Control Point
-// e3a1f2b4-7c5d-4e83-91f0-a6b2c3d4e5f6
-static const ble_uuid128_t gatt_svr_chr_pwm_cal_uuid =
+// characteristic: EVSE Settings Control Point
+// e3a1f2b4-7c5d-4e83-91f0-a6b2c3d4e5f6  (UUID unchanged)
+static const ble_uuid128_t gatt_svr_chr_evse_settings_uuid =
     BLE_UUID128_INIT(0xf6, 0xe5, 0xd4, 0xc3, 0xb2, 0xa6, 0xf0, 0x91, 0x83, 0x4e,
                      0x5d, 0x7c, 0xb4, 0xf2, 0xa1, 0xe3);
 
-#define SVR_CHR_PWM_CAL_OPCODE_SET_OFFSET 0
+// Opcodes for EVSE Settings Control Point
+// Write format: [opcode (1 byte)] [payload (variable)]
+#define SVR_CHR_PWM_CAL_OPCODE_SET_OFFSET        0  // payload: int16_t offset_us (2 bytes, little-endian)
+#define SVR_CHR_EVSE_SETTINGS_OPCODE_SET_AUTO_DETECT  1  // payload: uint8_t (0=disabled, 1=enabled)
+#define SVR_CHR_EVSE_SETTINGS_OPCODE_SET_DET_TIMEOUT  2  // payload: uint16_t ms (2 bytes, little-endian)
+
+// Read format: [offset_us int16 (2B)] [auto_detect uint8 (1B)] [detect_timeout_ms uint16 (2B)]
+
 extern uint8_t current_amp;
 extern int16_t pwm_cal_offset_us;
+extern bool evse_auto_detect;
+extern uint16_t evse_detect_timeout_ms;
 void cp_pwm_update(uint8_t amp);
 void pwm_cal_update(int16_t offset_us);
+void evse_settings_update_auto_detect(bool enabled);
+void evse_settings_update_detect_timeout(uint16_t timeout_ms);
 
 void gatt_svr_init();

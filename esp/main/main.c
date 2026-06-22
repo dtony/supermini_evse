@@ -33,6 +33,8 @@
 uint8_t current_amp = 0;
 int16_t pwm_cal_offset_us = 0;
 uint32_t ble_passkey = 0;
+bool evse_auto_detect = true;
+uint16_t evse_detect_timeout_ms = 2000;
 
 /* ---- PWM monitor (continuous ADC / DMA) ---------------------------------- */
 
@@ -332,6 +334,26 @@ void pwm_cal_update(int16_t offset_us) {
   cp_pwm_update(current_amp);
 }
 
+void evse_settings_update_auto_detect(bool enabled) {
+  evse_auto_detect = enabled;
+  nvs_handle_t nvs;
+  if (nvs_open("evse", NVS_READWRITE, &nvs) == ESP_OK) {
+    nvs_set_u8(nvs, "auto_detect", enabled ? 1u : 0u);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+  }
+}
+
+void evse_settings_update_detect_timeout(uint16_t timeout_ms) {
+  evse_detect_timeout_ms = timeout_ms;
+  nvs_handle_t nvs;
+  if (nvs_open("evse", NVS_READWRITE, &nvs) == ESP_OK) {
+    nvs_set_u16(nvs, "det_timeout", timeout_ms);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+  }
+}
+
 bool run_diagnostics() {
   // do some diagnostics
   return true;
@@ -358,30 +380,45 @@ void app_main(void) {
         pwm_cal_offset_us = saved_offset;
         ESP_LOGI(LOG_TAG_MAIN, "Loaded PWM cal offset: %d us", (int)saved_offset);
       }
+      uint8_t saved_auto_detect = 1;
+      if (nvs_get_u8(cal_nvs, "auto_detect", &saved_auto_detect) == ESP_OK) {
+        evse_auto_detect = (saved_auto_detect != 0);
+        ESP_LOGI(LOG_TAG_MAIN, "Loaded auto-detect: %s", evse_auto_detect ? "true" : "false");
+      }
+      uint16_t saved_timeout = 2000;
+      if (nvs_get_u16(cal_nvs, "det_timeout", &saved_timeout) == ESP_OK) {
+        evse_detect_timeout_ms = saved_timeout;
+        ESP_LOGI(LOG_TAG_MAIN, "Loaded detection timeout: %u ms", (unsigned)saved_timeout);
+      }
       nvs_close(cal_nvs);
     }
   }
 
-  /* Start PWM monitor first, then wait 5 s before deciding whether to init CP PWM */
+  /* Start PWM monitor first, then wait for the configured detection timeout
+   * before deciding whether to init CP PWM.
+   * If auto-detect is disabled, skip monitoring entirely. */
   TaskHandle_t pwm_monitor_handle = NULL;
-  xTaskCreate(pwm_monitor_task, "pwm_monitor", 4096, NULL, 5, &pwm_monitor_handle);
+  if (evse_auto_detect) {
+    xTaskCreate(pwm_monitor_task, "pwm_monitor", 4096, NULL, 5, &pwm_monitor_handle);
+    vTaskDelay(pdMS_TO_TICKS(evse_detect_timeout_ms));
+  }
 
-  vTaskDelay(pdMS_TO_TICKS(2000));
-
-  if (pwm_signal_valid) {
+  if (evse_auto_detect && pwm_signal_valid) {
   // if(true) { // test mode, simulate PWM detected
     if (pwm_monitor_handle != NULL) {
       vTaskDelete(pwm_monitor_handle);
       pwm_monitor_handle = NULL;
     }
     ESP_LOGI(LOG_TAG_MAIN, "Valid PWM detected on GPIO%d – skipping CP PWM init", ADC_CHANNEL_3);
-  } else {
+  } else if (evse_auto_detect) {
     if (pwm_monitor_handle != NULL) {
       vTaskDelete(pwm_monitor_handle);
       pwm_monitor_handle = NULL;
     }
     cp_pwm_update(6);
     ESP_LOGI(LOG_TAG_MAIN, "No valid PWM detected on GPIO%d – initializing CP PWM", ADC_CHANNEL_3);
+  } else {
+    ESP_LOGI(LOG_TAG_MAIN, "Auto-detect disabled – CP PWM not started automatically");
   }
 
   // check which partition is running

@@ -7,7 +7,7 @@ uint8_t gatt_svr_chr_ota_data_val[512];
 uint16_t ota_control_val_handle;
 uint16_t ota_data_val_handle;
 uint16_t current_amp_val_handle;
-uint16_t pwm_cal_val_handle;
+uint16_t evse_settings_val_handle;
 uint16_t service_changed_val_handle;
 
 const esp_partition_t *update_partition;
@@ -42,10 +42,10 @@ static int gatt_svr_chr_current_amp_cb(uint16_t conn_handle,
                                        struct ble_gatt_access_ctxt *ctxt,
                                        void *arg);
 
-static int gatt_svr_chr_pwm_cal_cb(uint16_t conn_handle,
-                                   uint16_t attr_handle,
-                                   struct ble_gatt_access_ctxt *ctxt,
-                                   void *arg);
+static int gatt_svr_chr_evse_settings_cb(uint16_t conn_handle,
+                                         uint16_t attr_handle,
+                                         struct ble_gatt_access_ctxt *ctxt,
+                                         void *arg);
 
 static int gatt_svr_chr_service_changed_cb(uint16_t conn_handle,
                                            uint16_t attr_handle,
@@ -123,12 +123,12 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                     .val_handle = &current_amp_val_handle,
                 },
                 {
-                    // characteristic: PWM Calibration Control Point
-                    .uuid = &gatt_svr_chr_pwm_cal_uuid.u,
-                    .access_cb = gatt_svr_chr_pwm_cal_cb,
+                    // characteristic: EVSE Settings Control Point
+                    .uuid = &gatt_svr_chr_evse_settings_uuid.u,
+                    .access_cb = gatt_svr_chr_evse_settings_cb,
                     .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE |
                              BLE_GATT_CHR_F_READ_AUTHEN | BLE_GATT_CHR_F_WRITE_AUTHEN,
-                    .val_handle = &pwm_cal_val_handle,
+                    .val_handle = &evse_settings_val_handle,
                 },
                 {
                     0,
@@ -394,30 +394,53 @@ static int gatt_svr_chr_current_amp_cb(uint16_t conn_handle,
   return BLE_ATT_ERR_UNLIKELY;
 }
 
-static int gatt_svr_chr_pwm_cal_cb(uint16_t conn_handle,
-                                   uint16_t attr_handle,
-                                   struct ble_gatt_access_ctxt *ctxt,
-                                   void *arg) {
+static int gatt_svr_chr_evse_settings_cb(uint16_t conn_handle,
+                                         uint16_t attr_handle,
+                                         struct ble_gatt_access_ctxt *ctxt,
+                                         void *arg) {
   int rc;
   uint8_t buf[3];
   uint16_t len;
 
   switch (ctxt->op) {
-    case BLE_GATT_ACCESS_OP_READ_CHR:
-      rc = os_mbuf_append(ctxt->om, &pwm_cal_offset_us, sizeof(pwm_cal_offset_us));
+    case BLE_GATT_ACCESS_OP_READ_CHR: {
+      /* Return all settings as a 5-byte struct:
+       *   [0..1] pwm_cal_offset_us  (int16_t,  little-endian)
+       *   [2]    auto_detect        (uint8_t,  0 or 1)
+       *   [3..4] detect_timeout_ms  (uint16_t, little-endian) */
+      uint8_t resp[5];
+      resp[0] = (uint8_t)((uint16_t)pwm_cal_offset_us & 0xFF);
+      resp[1] = (uint8_t)(((uint16_t)pwm_cal_offset_us >> 8) & 0xFF);
+      resp[2] = evse_auto_detect ? 1u : 0u;
+      resp[3] = (uint8_t)(evse_detect_timeout_ms & 0xFF);
+      resp[4] = (uint8_t)((evse_detect_timeout_ms >> 8) & 0xFF);
+      rc = os_mbuf_append(ctxt->om, resp, sizeof(resp));
       return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
 
     case BLE_GATT_ACCESS_OP_WRITE_CHR:
-      rc = gatt_svr_chr_write(ctxt->om, 3, 3, buf, &len);
+      /* Minimum 2 bytes: opcode + at least 1 payload byte */
+      rc = gatt_svr_chr_write(ctxt->om, 2, 3, buf, &len);
       if (rc != 0) {
         return rc;
       }
       if (buf[0] == SVR_CHR_PWM_CAL_OPCODE_SET_OFFSET) {
+        if (len < 3) { return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN; }
         int16_t offset = (int16_t)((uint16_t)buf[1] | ((uint16_t)buf[2] << 8));
         pwm_cal_update(offset);
         ESP_LOGI(LOG_TAG_GATT_SVR, "PWM cal offset set to %d us", (int)offset);
+      } else if (buf[0] == SVR_CHR_EVSE_SETTINGS_OPCODE_SET_AUTO_DETECT) {
+        if (len < 2) { return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN; }
+        bool enabled = (buf[1] != 0);
+        evse_settings_update_auto_detect(enabled);
+        ESP_LOGI(LOG_TAG_GATT_SVR, "EVSE auto-detect set to %s", enabled ? "true" : "false");
+      } else if (buf[0] == SVR_CHR_EVSE_SETTINGS_OPCODE_SET_DET_TIMEOUT) {
+        if (len < 3) { return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN; }
+        uint16_t timeout_ms = (uint16_t)buf[1] | ((uint16_t)buf[2] << 8);
+        evse_settings_update_detect_timeout(timeout_ms);
+        ESP_LOGI(LOG_TAG_GATT_SVR, "EVSE detection timeout set to %u ms", (unsigned)timeout_ms);
       } else {
-        ESP_LOGW(LOG_TAG_GATT_SVR, "Unknown PWM cal opcode: 0x%02x", buf[0]);
+        ESP_LOGW(LOG_TAG_GATT_SVR, "Unknown EVSE settings opcode: 0x%02x", buf[0]);
         return BLE_ATT_ERR_UNLIKELY;
       }
       return 0;
